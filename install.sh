@@ -16,7 +16,7 @@ read -p "Enter your choice (1 or 2): " SERVER_ROLE
 # ۱. نصب پیش‌نیازها
 echo ""
 echo "[*] Updating system and installing prerequisites..."
-sudo apt update && sudo apt install -y curl wget unzip python3 python3-pip ufw bc
+sudo apt update && sudo apt install -y curl wget unzip python3 python3-pip ufw bc python3-flask
 echo "[*] Waiting 3 seconds for packages to fully settle..."
 sleep 3
 
@@ -67,8 +67,8 @@ EOF"
     sudo mkdir -p /etc/custom-panel
     sudo touch /etc/custom-panel/users.db
 
-    # کدهای سرور وب پایتون (Flask) بدون کاراکترهای تداخلی لینوکس
-    sudo cat << 'EOF' > /etc/custom-panel/app.py
+    # کدهای سرور وب پایتون (Flask) با متد امن tee
+    sudo tee /etc/custom-panel/app.py > /dev/null << 'EOF'
 import os, subprocess
 from flask import Flask, request, render_template_string, redirect
 
@@ -174,7 +174,7 @@ def delete_user():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
-EOF"
+EOF
 
     # ساخت سرویس برای اجرای دائمی پنل وب اختصاصی در پس‌زمینه
     sudo bash -c "cat <<EOF > /etc/systemd/system/custom-panel.service
@@ -195,9 +195,8 @@ EOF"
     sudo systemctl enable custom-panel.service
     sudo systemctl start custom-panel.service
     
-    # اسکریپت کنترل اکانت‌های همزمان (تک‌کاربره کردن قطعی)
-    sudo mkdir -p /etc/custom-panel
-    sudo cat << 'EOF' > /etc/custom-panel/kill-multi.sh
+    # اسکریپت کنترل اکانت‌های همزمان با متد امن tee
+    sudo tee /etc/custom-panel/kill-multi.sh > /dev/null << 'EOF'
 #!/bin/bash
 while true; do
     if [ -f /etc/custom-panel/users.db ]; then
@@ -212,7 +211,7 @@ while true; do
     sleep 5
 done
 EOF
-    chmod +x /etc/custom-panel/kill-multi.sh
+    sudo chmod +x /etc/custom-panel/kill-multi.sh
     
     # ساخت سرویس تک‌کاربره
     sudo bash -c "cat <<EOF > /etc/systemd/system/ssh-kill-multi.service
@@ -228,6 +227,7 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 EOF"
+    sudo systemctl daemon-reload
     sudo systemctl enable ssh-kill-multi.service && sudo systemctl start ssh-kill-multi.service
 
     echo "=================================================="
@@ -259,15 +259,16 @@ EOF"
 
     echo "[*] Creating WebSocket Python Proxy..."
     sudo mkdir -p /etc/ssh-ws
-    sudo bash -c "cat <<EOF > /etc/ssh-ws/ws-proxy.py
+    
+    sudo tee /etc/ssh-ws/ws-proxy.py > /dev/null << 'EOF'
 import socket, threading
 def handle_client(client_socket):
     try:
         request = client_socket.recv(1024).decode('utf-8', errors='ignore')
-        if \"Upgrade: websocket\" in request or \"HTTP/1.1\" in request:
-            client_socket.sendall(b\"HTTP/1.1 101 Switching Protocols\\\r\\\nUpgrade: websocket\\\r\\\nConnection: Upgrade\\\r\\\n\\\r\\\n\")
+        if "Upgrade: websocket" in request or "HTTP/1.1" in request:
+            client_socket.sendall(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
             server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            server_socket.connect(('127.0.0.1', $IRAN_ENTRY_PORT))
+            server_socket.connect(('127.0.0.1', 443))
             def forward(src, dst):
                 try:
                     while True:
@@ -283,12 +284,12 @@ def handle_client(client_socket):
     except: client_socket.close()
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-server.bind(('0.0.0.0', $WS_PORT))
+server.bind(('0.0.0.0', 80))
 server.listen(100)
 while True:
     client, addr = server.accept()
     threading.Thread(target=handle_client, args=(client,)).start()
-EOF"
+EOF
 
     sudo bash -c "cat <<EOF > /etc/systemd/system/ssh-ws.service
 [Unit]
