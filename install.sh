@@ -34,7 +34,7 @@ TUNNEL_PORT=8443
 LOCAL_SSH_PORT=22
 IRAN_ENTRY_PORT=443
 WS_PORT=80
-WEB_PANEL_PORT=5000  # پورتی که پنل وب ما روی آن باز می‌شود
+WEB_PANEL_PORT=5000
 
 # ==================================================
 # تنظیمات سرور خارج (ساخت پنل وب اختصاصی پایتون)
@@ -62,23 +62,20 @@ WantedBy=multi-user.target
 EOF"
     sudo systemctl daemon-reload && sudo systemctl enable gost-tunnel.service && sudo systemctl start gost-tunnel.service
 
-    # ساخت پوشه و کدهای پنل وب پایتون
+    # ساخت پوشه پنل وب اختصاصی
     echo "[*] Creating Custom Web GUI Panel..."
     sudo mkdir -p /etc/custom-panel
-    
-    # ایجاد فایل دیتابیس کاربران
     sudo touch /etc/custom-panel/users.db
 
-    # کدهای سرور وب پایتون (Flask)
-    sudo bash -c "cat << 'EOF' > /etc/custom-panel/app.py
+    # کدهای سرور وب پایتون (Flask) بدون کاراکترهای تداخلی لینوکس
+    sudo cat << 'EOF' > /etc/custom-panel/app.py
 import os, subprocess
 from flask import Flask, request, render_template_string, redirect
 
 app = Flask(__name__)
 DB_FILE = "/etc/custom-panel/users.db"
 
-# قالب گرافیکی ساده و تمیز وب با HTML/CSS مستقیم
-HTML_TEMPLATE = '''
+HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
@@ -103,8 +100,8 @@ HTML_TEMPLATE = '''
         <form action="/add" method="POST">
             <input type="text" name="username" placeholder="نام کاربری" required>
             <input type="text" name="password" placeholder="کلمه عبور" required>
-            <input type="number" name="limit_gb" placeholder="حجم (GB)" required>
-            <input type="number" name="days" placeholder="اعتبار (روز)" required>
+            <input type="number" name="limit_gb" placeholder="حجم به گیگابایت" required>
+            <input type="number" name="days" placeholder="اعتبار به روز" required>
             <button type="submit">ذخیره کاربر</button>
         </form>
 
@@ -114,7 +111,7 @@ HTML_TEMPLATE = '''
                 <th>نام کاربری</th>
                 <th>محدودیت حجم</th>
                 <th>مدت اعتبار</th>
-                <th>محدودیت کاربر (IP)</th>
+                <th>محدودیت کاربر</th>
                 <th>عملیات</th>
             </tr>
             {% for user in users %}
@@ -122,7 +119,7 @@ HTML_TEMPLATE = '''
                 <td>{{ user[0] }}</td>
                 <td>{{ user[1] }} GB</td>
                 <td>{{ user[2] }} روز</td>
-                <td>تک‌کاربره (1 IP)</td>
+                <td>تک کاربره (1 IP)</td>
                 <td>
                     <form action="/delete" method="POST" style="margin:0;">
                         <input type="hidden" name="username" value="{{ user[0] }}">
@@ -135,7 +132,7 @@ HTML_TEMPLATE = '''
     </div>
 </body>
 </html>
-'''
+"""
 
 def get_users():
     users = []
@@ -158,33 +155,24 @@ def add_user():
     days = request.form['days'].strip()
     
     if username and password:
-        # ۱. ساخت یوزر لینوکسی در پس‌زمینه سرور خارج
-        subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], devnull=True)
+        subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True)
-        
-        # ۲. اضافه کردن به دیتابیس متنی خودمان
         with open(DB_FILE, "a") as f:
             f.write(f"{username}:{limit_gb}:{days}\n")
-            
     return redirect('/')
 
 @app.route('/delete', methods=['POST'])
 def delete_user():
     username = request.form['username'].strip()
-    # ۱. حذف از سیستم‌عامل
-    subprocess.run(["sudo", "userdel", "-r", username], devnull=True)
-    
-    # ۲. حذف از دیتابیس خودمان
+    subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     users = get_users()
     with open(DB_FILE, "w") as f:
         for user in users:
             if user[0] != username:
                 f.write(f"{user[0]}:{user[1]}:{user[2]}\n")
-                
     return redirect('/')
 
 if __name__ == '__main__':
-    # اجرای پنل روی پورت 5000 روی تمام آی‌پی‌های سرور
     app.run(host='0.0.0.0', port=5000)
 EOF"
 
@@ -208,21 +196,22 @@ EOF"
     sudo systemctl start custom-panel.service
     
     # اسکریپت کنترل اکانت‌های همزمان (تک‌کاربره کردن قطعی)
-    sudo bash -c "cat << 'EOF' > /etc/custom-panel/kill-multi.sh
+    sudo mkdir -p /etc/custom-panel
+    sudo cat << 'EOF' > /etc/custom-panel/kill-multi.sh
 #!/bin/bash
-# بررسی اتصالات SSH و بیرون انداختن اتصال دوم هر یوزر
 while true; do
-    for user in \$(awk -F: '{print \$1}' /etc/custom-panel/users.db); do
-        pids=\$(ps -u \$user -o pid=)
-        count=\$(echo \"\$pids\" | wc -w)
-        if [ \"\$count\" -gt 1 ]; then
-            # کشتن اتصال قدیمی‌تر و نگه داشتن فقط ۱ اتصال فعال
-            kill -9 \$(echo \"\$pids\" | awk '{print \$1}')
-        fi
-    done
+    if [ -f /etc/custom-panel/users.db ]; then
+        for user in $(awk -F: '{print $1}' /etc/custom-panel/users.db); do
+            pids=$(ps -u $user -o pid= || true)
+            count=$(echo "$pids" | wc -w)
+            if [ "$count" -gt 1 ]; then
+                kill -9 $(echo "$pids" | awk '{print $1}')
+            fi
+        done
+    fi
     sleep 5
 done
-EOF"
+EOF
     chmod +x /etc/custom-panel/kill-multi.sh
     
     # ساخت سرویس تک‌کاربره
