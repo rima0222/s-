@@ -1,25 +1,36 @@
 #!/bin/bash
 
-# ۱. آزادسازی پورت ۵۰۰۰ و کشتن پروسس‌های قدیمی پایتون
+# ۱. آزادسازی پورت ۵۰۰۰ و پاکسازی پروسس‌های تداخلی لینوکس
 sudo killall -9 python3 2>/dev/null
 sudo fuser -k 5000/tcp 2>/dev/null
 sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock 2>/dev/null
 
-# ۲. نصب پیش‌نیازهای پایدار اوبونتو
+# ۲. پیکربندی و باز کردن پورت‌های لازم در فایروال لینوکس (UFW & Iptables)
+echo "[*] Configuring firewall rules and opening port 5000..."
+sudo ufw allow 5000/tcp >/dev/null 2>&1
+sudo ufw allow 22/tcp >/dev/null 2>&1
+sudo ufw --force enable >/dev/null 2>&1
+sudo ufw reload >/dev/null 2>&1
+
+# اطمینان از باز بودن پورت در فایروال خام iptables
+sudo iptables -I INPUT -p tcp --dport 5000 -j ACCEPT 2>/dev/null
+sudo iptables -I INPUT -p tcp --dport 22 -j ACCEPT 2>/dev/null
+
+# ۳. نصب پکیج‌های پیش‌نیاز سیستم‌عامل
 sudo apt update -y
 sudo apt install -y openssh-server python3 python3-flask sqlite3 psmisc coreutils
 
-# ۳. ایجاد پوشه اصلی پنل با دسترسی‌های لازم
+# ۴. ایجاد دایرکتوری اصلی پنل شیشه‌ای
 sudo mkdir -p /etc/custom-panel
 sudo chmod 755 /etc/custom-panel
 
-# ۴. تزریق مستقیم کد پایتون کالیبره شده (کاهش حجم ۳.۵ برابری برای همگام‌سازی با گوشی)
+# ۵. تزریق کد پایتون اصلاح‌شده و بدون باگ سینتکس
 cat << 'EOF' > /etc/custom-panel/app.py
 import os, subprocess, datetime, sqlite3, json, time, threading, pwd
 from flask import Flask, request, render_template_string, redirect, send_file, jsonify
 
 app = Flask(__name__)
-app.secret_key = "ssh_pro_precision_final_v7"
+app.secret_key = "ssh_pro_precision_final_v8"
 DB_FILE = "/etc/custom-panel/panel.db"
 db_lock = threading.Lock()
 
@@ -70,7 +81,7 @@ def live_monitor_daemon():
                             user_to_pids_map[user] = []
                         user_to_pids_map[user].append(pid)
 
-            # سیستم تک‌کاربره سخت‌گیرانه (حفظ اتصال جدید و کشتن اتصالات موازی قدیمی)
+            # سیستم تک‌کاربره آنی (حفظ اتصال آخر و کشتن سشن‌های موازی قبلی)
             for username, pids in user_to_pids_map.items():
                 if len(pids) > 1:
                     pids.sort(key=int)
@@ -79,7 +90,7 @@ def live_monitor_daemon():
                         if old_pid in LAST_PID_BYTES:
                             del LAST_PID_BYTES[old_pid]
 
-            # محاسبه ترافیک مصرفی و تقسیم بر ۳.۵ جهت تطبیق کامل با کنتور دیتای گوشی کلاینت
+            # محاسبه دقیق ترافیک تفاضلی و کالیبره کردن آن (تقسیم بر فاکتور ۳.۵ برای هماهنگی با گوشی)
             with db_lock:
                 conn = get_db_connection()
                 cursor = conn.cursor()
@@ -109,7 +120,7 @@ def live_monitor_daemon():
                 if dead_pid not in active_pids_this_run:
                     del LAST_PID_BYTES[dead_pid]
 
-            # مسدودسازی و قطع ارتباط آنی کاربران منقضی شده یا اتمام حجم یافته
+            # قطع دسترسی آنی کاربران منقضی شده یا اتمام حجم یافته
             with db_lock:
                 conn = get_db_connection()
                 cursor = conn.cursor()
@@ -354,7 +365,7 @@ def renew_user(username):
 def delete_user(username):
     try:
         subprocess.run(f"sudo pkill -9 -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["sudo", "userdel", "-r", username], stdout=stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         with db_lock:
             conn = get_db_connection()
             cursor = conn.cursor()
@@ -379,7 +390,7 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
 EOF
 
-# ۵. ساخت فایل سرویس سیستم‌عامل در مسیر استاندارد و کاملاً فیکس شده لینوکس
+# ۶. ساخت فایل سرویس با اصلاح مسیر ۱۰۰٪ تضمینی لینوکس اوبونتو
 sudo tee /etc/systemd/system/custom-panel.service > /dev/null << 'SERVICEEOF'
 [Unit]
 Description=SSH Pro Absolute Calibrated Engine Panel
@@ -397,12 +408,13 @@ RestartSec=2
 WantedBy=multi-user.target
 SERVICEEOF
 
-# ۶. لود مجدد دیمون‌ها و استارت نهایی دیمون سیستمی بدون خطا
+# ۷. ریلود، فعال‌سازی دایمی و استارت نهایی دیمون سیستمی بدون خطای مسیر
 sudo systemctl daemon-reload
 sudo systemctl enable custom-panel.service
 sudo systemctl restart custom-panel.service
 
 echo "--------------------------------------------------"
-echo "✔ PATH FIXED AND SERVICE STARTED SUCCESSFULLY"
-echo "🌐 LISTEN WEB PORT: 5000"
+echo "✔ FIREWALLS CONFIGURATION INJECTED SUCCESSFULLY"
+echo "✔ PORT 5000 OPENED AND SYSTEMD ENGINE IS LIVE"
+echo "🌐 LISTEN WEB PORT: http://144.172.116.73:5000"
 echo "--------------------------------------------------"
