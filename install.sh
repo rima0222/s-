@@ -1,40 +1,75 @@
 #!/bin/bash
 
-# خروج در صورت بروز خطا
+# خروج سریع در صورت بروز خطای پیش‌بینی نشده
 set -e
 
 clear
+echo -e "\e[1;33m[*] Killing package managers and forcing lock release...\e[0m"
+
+# ۱. آزاد کردن اجباری قفل dpkg و بستن پروسس‌های مزاحم سیستم‌عامل
+sudo killall -9 apt-get apt unattended-upgrades || true
+sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/cache/apt/archives/lock
+sudo dpkg --configure -a || true
+
+echo -e "\e[1;32m✔ System locks cleared successfully.\e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
-echo -e "\e[1;36m    SSH PRO PANEL (FINAL FIXED & AUTO MIGRATE)    \e[0m"
+echo -e "\e[1;36m    SSH PRO PANEL (ANTI-LOCK & TOTAL PURGE V3)   \e[0m"
+echo -e "\e[1;34m==================================================\e[0m"
+
+# ۲. ایجاد مکث ۳ ثانیه‌ای به صورت شمارش معکوس زنده
+for i in {3..1}; do
+    echo -e "\e[1;35m⏳ Starting installation in $i seconds...\e[0m"
+    sleep 1
+done
+
+echo -e "\e[1;32m🚀 Launching installation now...\e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
 
 DB_FILE="/etc/custom-panel/panel.db"
 WEB_PANEL_PORT=5000
 
+purge_old_installation() {
+    echo "[*] Cleaning up and purging previous installation files..."
+    
+    # متوقف کردن و حذف سرویس‌های قبلی
+    sudo systemctl stop custom-panel.service 2>/dev/null || true
+    sudo systemctl disable custom-panel.service 2>/dev/null || true
+    sudo rm -f /etc/systemd/system/custom-panel.service
+    sudo systemctl daemon-reload
+    
+    # کشتن پروسس‌های باقی‌مانده پایتون روی پورت پنل
+    sudo fuser -k $WEB_PANEL_PORT/tcp 2>/dev/null || true
+    
+    # حذف دیتابیس قدیمی برای نصب کاملاً از نو و تمیز
+    sudo rm -rf /etc/custom-panel
+}
+
 install_prerequisites() {
-    echo "[*] Fixing potential dpkg locks and installing requirements..."
-    sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/cache/apt/archives/lock
-    sudo dpkg --configure -a || true
+    echo "[*] Extra safety check: ensuring updates timers are quiet..."
+    sudo systemctl stop unattended-upgrades 2>/dev/null || true
+    sudo systemctl stop apt-daily.timer 2>/dev/null || true
+    sudo systemctl stop apt-daily-upgrade.timer 2>/dev/null || true
     
-    sudo apt update
-    sudo apt install -y openssh-server python3 python3-pip python3-flask ufw sqlite3 bc
+    echo "[*] Installing required system packages..."
+    sudo apt update -y
+    sudo apt install -y openssh-server python3 python3-pip python3-flask ufw sqlite3 bc psmisc
     
+    # تنظیم فایروال سرور
     sudo ufw allow $WEB_PANEL_PORT/tcp comment 'Web Panel'
-    sudo ufw allow 443/tcp comment 'SSH Port'
-    sudo ufw allow 22/tcp comment 'SSH MGMT'
+    sudo ufw allow 22/tcp comment 'SSH Default'
     sudo ufw --force enable
     
     sudo mkdir -p /etc/custom-panel
 }
 
 create_panel_app() {
-    echo "[*] Creating Core Asynchronous Python Web GUI with Error Alerts..."
+    echo "[*] Generating core Python Web GUI script..."
     sudo tee /etc/custom-panel/app.py > /dev/null << 'EOF'
 import os, subprocess, datetime, sqlite3, json, time, threading
 from flask import Flask, request, render_template_string, redirect, send_file, jsonify, flash
 
 app = Flask(__name__)
-app.secret_key = "ssh_pro_premium_async_fixed_key"
+app.secret_key = "ssh_pro_ultimate_clean_key"
 DB_FILE = "/etc/custom-panel/panel.db"
 
 def init_db():
@@ -47,19 +82,11 @@ def init_db():
             limit_gb REAL,
             used_gb REAL DEFAULT 0.0,
             expire_date TEXT,
-            status TEXT DEFAULT 'Active'
+            status TEXT DEFAULT 'Active',
+            initial_gb REAL,
+            initial_days INTEGER
         )
     ''')
-    # حل مشکل عدم تطابق دیتابیس قدیمی با ساختار جدید (Auto Migration)
-    try:
-        cursor.execute("ALTER TABLE users ADD COLUMN initial_gb REAL")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        cursor.execute("ALTER TABLE users ADD COLUMN initial_days INTEGER")
-    except sqlite3.OperationalError:
-        pass
-        
     conn.commit()
     conn.close()
 
@@ -79,17 +106,12 @@ def background_monitor():
             active_users = cursor.fetchall()
             
             today = datetime.datetime.now().strftime("%Y-%m-%d")
-            
-            try:
-                output = subprocess.check_output("w -h | awk '{print $1}'", shell=True).decode()
-                online_list = list(set(output.strip().split('\n')))
-            except:
-                online_list = []
+            online_list = get_online_users()
 
             for user in set(online_list):
                 if user:
                     try:
-                        count = int(subprocess.check_output(f"ps -u {user} | grep sshd | wc -l", shell=True).decode().strip())
+                        count = int(subprocess.check_output(f"ps -u {user} | grep -E 'sshd|ssh' | wc -l", shell=True).decode().strip())
                         if count > 2: 
                             subprocess.run(f"sudo killall -u {user}", shell=True)
                     except:
@@ -103,15 +125,17 @@ def background_monitor():
                     continue
                 
                 cursor.execute("SELECT used_gb FROM users WHERE username=?", (username,))
-                used = cursor.fetchone()[0]
-                if used and limit and used >= limit:
-                    subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    cursor.execute("UPDATE users SET status='Traffic_Limit' WHERE username=?", (username,))
+                res = cursor.fetchone()
+                if res:
+                    used = res[0]
+                    if used and limit and used >= limit:
+                        subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        cursor.execute("UPDATE users SET status='Traffic_Limit' WHERE username=?", (username,))
             
             conn.commit()
             conn.close()
         except Exception as e:
-            print(f"Monitor Error: {e}")
+            print(f"Monitor Warning: {e}")
         
         time.sleep(15)
 
@@ -156,12 +180,12 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <h1>⚡ پنل مدیریت هوشمند SSH PRO (نسخه اصلاح شده)</h1>
+        <h1>⚡ پنل مدیریت هوشمند SSH PRO (نسخه کاملاً خودکار و مستقل)</h1>
         
         {% with messages = get_flashed_messages() %}
           {% if messages %}
             {% for message in messages %}
-              <div class="alert-flash">⚠️ خطای سیستم: {{ message }}</div>
+              <div class="alert-flash">⚠️ سیستم: {{ message }}</div>
             {% endfor %}
           {% endif %}
         {% endwith %}
@@ -305,7 +329,6 @@ def add_user():
         days = int(request.form['days'].strip())
         expire_date = (datetime.datetime.now() + datetime.timedelta(days=days)).strftime("%Y-%m-%d")
         
-        # ثبت در لینوکس هسته اصلی سرور
         subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True, check=True)
         
@@ -413,7 +436,52 @@ def restore_backup():
             init_gb = item.get('initial_gb', limit_gb)
             init_days = item.get('initial_days', 30)
             
-            # پاک کردن کاربر قدیمی اگر از قبل مانده باشد تا تداخلی پیش نیاید
             subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], check=True, stdout=
+            subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True, check=True)
+            if status != 'Active':
+                subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                
+            cursor.execute('''
+                INSERT OR REPLACE INTO users (username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (username, password, limit_gb, used_gb, expire_date, status, init_gb, init_days))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        flash(str(e))
+    return redirect('/')
+
+if __name__ == '__main__':
+    init_db()
+    threading.Thread(target=background_monitor, daemon=True).start()
+    app.run(host='0.0.0.0', port=5000)
+EOF
+
+    sudo tee /etc/systemd/system/custom-panel.service > /dev/null <<EOF
+[Unit]
+Description=SSH Advanced GUI Dark Panel Ultimate
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /etc/custom-panel/app.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable custom-panel.service
+    sudo systemctl restart custom-panel.service
+}
+
+purge_old_installation
+install_prerequisites
+create_panel_app
+
+echo -e "\e[1;32m==================================================\e[0m"
+echo -e "\e[1;32m✔ SUCCESS: PANEL COMPLETELY PURGED & REINSTALLED!  \e[0m"
+echo -e "\e[1;36m🌐 Web UI Port: 5000                               \e[0m"
+echo -e "\e[1;32m==================================================\e[0m"
