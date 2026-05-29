@@ -5,27 +5,55 @@ set -e
 
 clear
 echo "=================================================="
-echo "    SSH Tunnel + WEB GUI (PURE IPTABLES MODE)     "
+echo "    SSH Tunnel + WEB GUI (STABLE GOST TCP MODE)   "
 echo "=================================================="
 echo "Please select the role of this server:"
 echo "1) Server KHAREJ (Main + Custom Web GUI Panel)"
-echo "2) Server IRAN (Pure IPtables Port Forward)"
+echo "2) Server IRAN (Stable Bridge Tunnel)"
 echo "=================================================="
 read -p "Enter your choice (1 or 2): " SERVER_ROLE
 
+TUNNEL_PORT=8888
 WEB_PANEL_PORT=5000
 
+# دانلود و نصب ابزار GOST در صورت عدم وجود
+if [ ! -f /usr/local/bin/gost ]; then
+    echo "[*] Installing GOST Tunneling Tool..."
+    wget https://github.com/ginuerzh/gost/releases/download/v2.11.5/gost-linux-amd64-2.11.5.gz
+    gunzip gost-linux-amd64-2.11.5.gz
+    chmod +x gost-linux-amd64-2.11.5
+    sudo mv gost-linux-amd64-2.11.5 /usr/local/bin/gost
+fi
+
 # ==================================================
-# تنظیمات سرور خارج (پنل وب گرافیکی)
+# تنظیمات سرور خارج
 # ==================================================
 if [ "$SERVER_ROLE" == "1" ]; then
-    echo "[*] Updating system and installing Flask..."
+    echo "[*] Configuring Server KHAREJ..."
     sudo apt update && sudo apt install -y python3 python3-pip python3-flask ufw
     
+    sudo ufw allow $TUNNEL_PORT/tcp comment 'Gost Connection'
     sudo ufw allow $WEB_PANEL_PORT/tcp comment 'Custom Web GUI'
-    sudo ufw allow 22/tcp comment 'SSH Port'
     sudo ufw reload
     
+    # ایجاد سرویس تونل رو خارج برای تحویل ترافیک به SSH داخلی
+    sudo tee /etc/systemd/system/gost-stable.service > /dev/null <<EOF
+[Unit]
+Description=Gost Stable Tunnel Target
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/gost -L tcp://:$TUNNEL_PORT/127.0.0.1:22
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    sudo systemctl daemon-reload && sudo systemctl enable gost-stable.service && sudo systemctl start gost-stable.service
+
     echo "[*] Creating Custom Web GUI Panel..."
     sudo mkdir -p /etc/custom-panel
     sudo touch /etc/custom-panel/users.db
@@ -151,41 +179,37 @@ WantedBy=multi-user.target
 EOF
 
     sudo systemctl daemon-reload && sudo systemctl enable custom-panel.service && sudo systemctl start custom-panel.service
-    
-    echo "=================================================="
-    echo "✔ Server KHAREJ Custom Panel Ready!"
-    echo "🌐 http://YOUR_KHAREJ_IP:5000"
-    echo "=================================================="
+    echo "✔ Server KHAREJ Ready!"
 
 # ==================================================
-# تنظیمات سرور ایران (فوروارد مستقیم با IPtables)
+# تنظیمات سرور ایران
 # ==================================================
 elif [ "$SERVER_ROLE" == "2" ]; then
-    echo "[*] Configuring Server IRAN (Pure IPtables)..."
+    echo "[*] Configuring Server IRAN..."
     read -p "Enter Server KHAREJ IP address: " KHAREJ_IP
     
-    # حذف گوست و سرویس‌های قبلی برای سبک‌سازی کامل سرور ایران
-    sudo systemctl stop gost-tunnel.service 2>/dev/null || true
-    sudo systemctl disable gost-tunnel.service 2>/dev/null || true
-    sudo rm -f /etc/systemd/system/gost-tunnel.service
+    # پاک کردن رول‌های آی‌پی‌تیبلز قدیمی برای جلوگیری از تداخل
+    sudo iptables -t nat -F 2>/dev/null || true
     
-    # فعال کردن فوروارد پکت‌ها در هسته لینوکس سرور ایران
-    sudo sysctl -w net.ipv4.ip_forward=1
-    echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf > /dev/null
-    
-    # پاک کردن رول‌های قدیمی احتمالاً تداخلی
-    sudo iptables -t nat -F
-    
-    # دستور جادویی آینه‌ای کردن پورت ۸۰ ایران به پورت ۲۲ خارج
-    sudo iptables -t nat -A PREROUTING -p tcp --dport 80 -j DNAT --to-destination $KHAREJ_IP:22
-    sudo iptables -t nat -A POSTROUTING -p tcp -d $KHAREJ_IP --dport 22 -j MASQUERADE
-    
-    # نصب ابزار ذخیره دائمی رول‌های آی‌پی‌تیبلز تا با ریستارت سرور پاک نشوند
-    echo iptables-persistent iptables-persistent/autosave_v4 boolean true | sudo debconf-set-selections
-    echo iptables-persistent iptables-persistent/autosave_v6 boolean true | sudo debconf-set-selections
-    sudo apt install -y iptables-persistent
+    sudo ufw allow 80/tcp
+    sudo ufw reload
 
-    echo "=================================================="
-    echo "✔ Server IRAN Port Forwarding via IPtables Ready!"
-    echo "=================================================="
+    # ساخت یک تونل فوق‌العاده پایدار که پورت ۸۰ ایران را فورا می‌فرستد به تونل خارج
+    sudo tee /etc/systemd/system/gost-stable.service > /dev/null <<EOF
+[Unit]
+Description=Gost Stable Tunnel Bridge on Iran
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/gost -L tcp://:80/$KHAREJ_IP:$TUNNEL_PORT
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    sudo systemctl daemon-reload && sudo systemctl enable gost-stable.service && sudo systemctl restart gost-stable.service
+    echo "✔ Server IRAN Ready!"
 fi
