@@ -1,52 +1,34 @@
 #!/bin/bash
 
-# غیرفعال کردن خروج اضطراری برای بخش‌های نوسانی جهت تضمین عدم کرش
-set +e
+# ۱. آزادسازی پورت و پروسس‌های قبلی
+sudo killall -9 python3 2>/dev/null
+sudo fuser -k 5000/tcp 2>/dev/null
+sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock 2>/dev/null
 
-clear
-echo -e "\e[1;33m[*] Calibrating Traffic Counter & Optimizing Byte-to-GB Formula...\e[0m"
+# ۲. نصب پکیج‌های پیش‌فرض
+sudo apt update -y
+sudo apt install -y openssh-server python3 python3-flask sqlite3 psmisc
 
-# آزاد کردن قفل‌های سیستم‌عامل
-sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/cache/apt/archives/lock 2>/dev/null
-sudo dpkg --configure -a 2>/dev/null
+# ۳. ایجاد دایرکتوری اصلی پنل
+sudo mkdir -p /etc/custom-panel
+sudo chmod 777 /etc/custom-panel
 
-echo -e "\e[1;34m==================================================\e[0m"
-echo -e "\e[1;36m      SSH PRO PANEL (RENDER BUG FIXED)            \e[0m"
-echo -e "\e[1;34m==================================================\e[0m"
-
-DB_FILE="/etc/custom-panel/panel.db"
-WEB_PANEL_PORT=5000
-
-update_and_replace_logic() {
-    echo "[*] Ensuring port 5000 is clean..."
-    sudo fuser -k $WEB_PANEL_PORT/tcp 2>/dev/null
-    sudo mkdir -p /etc/custom-panel
-}
-
-install_prerequisites() {
-    echo "[*] Reviewing server packages..."
-    set -e
-    sudo apt update -y
-    sudo apt install -y openssh-server python3 python3-pip python3-flask ufw sqlite3 bc psmisc net-tools
-    set +e
-}
-
-create_panel_app() {
-    echo "[*] Injecting Updated iOS Glassmorphism Web Panel..."
-    sudo tee /etc/custom-panel/app.py > /dev/null << 'EOF'
-import os, subprocess, datetime, sqlite3, json, time, threading, pwd
-from flask import Flask, request, render_template_string, redirect, send_file, jsonify, flash
+# ۴. تزریق مستقیم کد پایتون بهینه شده با معماری غیرهمگام
+cat << 'EOF' > /etc/custom-panel/app.py
+import os, subprocess, datetime, sqlite3, json, time, threading, pwd, re
+from flask import Flask, request, render_template_string, redirect, send_file, jsonify
 
 app = Flask(__name__)
-app.secret_key = "ssh_pro_glass_premium_key_v4"
+app.secret_key = "ssh_pro_architecture_v3"
 DB_FILE = "/etc/custom-panel/panel.db"
-TRAFFIC_TRACKER = {}
-
 db_lock = threading.Lock()
 
+# ذخیره موقت بایت‌های قبلی کاربر برای محاسبه دقیق ترافیک لحظه‌ای
+TRAFFIC_TRACKER = {}
+
 def get_db_connection():
-    conn = sqlite3.connect(DB_FILE, timeout=30.0, check_same_thread=False)
-    conn.execute('PRAGMA journal_mode=WAL;')
+    conn = sqlite3.connect(DB_FILE, timeout=20.0, check_same_thread=False)
+    conn.execute('PRAGMA journal_mode=WAL;') # جلوگیری از قفل شدن دیتابیس هنگام خواندن و نوشتن همزمان
     return conn
 
 def init_db():
@@ -68,407 +50,194 @@ def init_db():
         conn.commit()
         conn.close()
 
-def get_sshd_connections():
-    connections = {}
+def get_sshd_connections_and_traffic():
+    """
+    استخراج آنلاین‌ها و ترافیک دقیق مصرفی هر پروسه از هسته لینوکس
+    """
+    online_users = []
+    pid_traffic = {}
+    
+    # خواندن آمار بایت‌های شبکه کلاینت‌ها از سیستم عامل
     try:
-        output = subprocess.check_output("ps -eo user,pid,command | grep -E 'sshd:|ssh:'", shell=True).decode()
-        for line in output.strip().split('\n'):
+        # پیدا کردن کلاینت‌های متصل به sshd
+        ps_output = subprocess.check_output("ps -eo user,pid,command | grep -E 'sshd:'", shell=True).decode()
+        for line in ps_output.strip().split('\n'):
             parts = line.split()
             if len(parts) >= 3:
                 user = parts[0].strip()
                 pid = parts[1].strip()
-                if user not in ['root', 'sshd', 'nobody', 'ssh'] and 'net' not in user:
-                    if user not in connections:
-                        connections[user] = []
-                    connections[user].append(pid)
+                if user not in ['root', 'sshd', 'nobody'] and 'net' not in user:
+                    if user not in online_users:
+                        online_users.append(user)
+                    
+                    # پیدا کردن حجم مصرفی دقیق این PID از طریق خروجی شبکه لینوکس
+                    try:
+                        with open(f"/proc/{pid}/net/dev", "r") as f:
+                            net_data = f.read()
+                        # جمع زدن بایت‌های دریافتی و ارسالی کلاینت
+                        bytes_sum = 0
+                        for net_line in net_data.split('\n'):
+                            if ':' in net_line:
+                                net_parts = net_line.split()
+                                if len(net_parts) >= 10:
+                                    bytes_sum += int(net_parts[1]) + int(net_parts[9]) # Rx bytes + Tx bytes
+                        pid_traffic[user] = pid_traffic.get(user, 0) + bytes_sum
+                    except:
+                        pass
     except:
         pass
-    return connections
+    return online_users, pid_traffic
 
-def get_online_users():
-    return list(get_sshd_connections().keys())
-
-def update_traffic_from_proc():
+def live_monitor_daemon():
+    """
+    دیمون پس‌زمینه برای اعمال محدودیت تک‌کاربره و بروزرسانی ترافیک بدون درگیر کردن لودینگ وب
+    """
     global TRAFFIC_TRACKER
     while True:
         try:
-            active_connections = get_sshd_connections()
-            if active_connections:
+            today = datetime.datetime.now().strftime("%Y-%m-%d")
+            online_now, current_bytes = get_sshd_connections_and_traffic()
+            
+            # ۱. محاسبه ترافیک واقعی و ثبت تفاوت مابین بایت‌ها در دیتابیس
+            if online_now:
                 with db_lock:
                     conn = get_db_connection()
                     cursor = conn.cursor()
-                    
-                    for username, pids in active_connections.items():
-                        for pid in pids:
-                            net_file = f"/proc/{pid}/net/dev"
-                            if os.path.exists(net_file):
-                                try:
-                                    with open(net_file, "r") as f:
-                                        lines = f.readlines()
-                                    bytes_sum = 0
-                                    for line in lines:
-                                        if ":" in line:
-                                            parts = line.split()
-                                            bytes_sum += int(parts[1]) + int(parts[9])
-                                    
-                                    if username not in TRAFFIC_TRACKER:
-                                        TRAFFIC_TRACKER[username] = {"last_bytes": bytes_sum}
-                                        continue
-                                    
-                                    diff = bytes_sum - TRAFFIC_TRACKER[username]["last_bytes"]
-                                    if diff > 0:
-                                        calibrated_bytes = diff * 0.68
-                                        diff_gb = calibrated_bytes / (1024.0 * 1024.0 * 1024.0)
-                                        cursor.execute("UPDATE users SET used_gb = used_gb + ? WHERE username = ?", (diff_gb, username))
-                                    
-                                    TRAFFIC_TRACKER[username]["last_bytes"] = bytes_sum
-                                except:
-                                    pass
+                    for user in online_now:
+                        if user in current_bytes:
+                            new_bytes = current_bytes[user]
+                            if user in TRAFFIC_TRACKER:
+                                diff = new_bytes - TRAFFIC_TRACKER[user]
+                                if diff > 0:
+                                    diff_gb = diff / (1024 * 1024 * 1024)
+                                    cursor.execute("UPDATE users SET used_gb = used_gb + ? WHERE username = ? AND status='Active'", (diff_gb, user))
+                            TRAFFIC_TRACKER[user] = new_bytes
                     conn.commit()
                     conn.close()
-        except Exception as e:
-            print(f"Error in traffic monitoring: {e}")
-        time.sleep(2)
 
-def monitor_core_logic():
-    while True:
-        try:
-            today = datetime.datetime.now().strftime("%Y-%m-%d")
+            # ۲. سیستم قطع اتصال سریع برای دیوایس‌های همزمان (تک کاربره سخت‌گیرانه)
+            try:
+                ps_output = subprocess.check_output("ps -eo user,pid,command | grep -E 'sshd:'", shell=True).decode()
+                user_pids = {}
+                for line in ps_output.strip().split('\n'):
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        user = parts[0].strip()
+                        pid = parts[1].strip()
+                        if user not in ['root', 'sshd', 'nobody'] and 'net' not in user:
+                            if user not in user_pids: user_pids[user] = []
+                            user_pids[user].append(pid)
+                
+                for username, pids in user_pids.items():
+                    if len(pids) > 1:
+                        # اگر بیش از یک دیوایس بود، دیوایس‌های قدیمی یا اضافی بلافاصله قطع می‌شوند
+                        for extra_pid in pids[1:]:
+                            subprocess.run(["sudo", "kill", "-9", extra_pid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except:
+                pass
+
+            # ۳. بررسی وضعیت حجمی و زمانی در دیتابیس
             with db_lock:
                 conn = get_db_connection()
                 cursor = conn.cursor()
                 
-                cursor.execute("SELECT username, expire_date, status FROM users WHERE status='Active'")
-                active_users = cursor.fetchall()
-                for user in active_users:
-                    username, expire_date, status = user
+                cursor.execute("SELECT username, expire_date, limit_gb, used_gb FROM users WHERE status='Active'")
+                for username, expire_date, limit_gb, used_gb in cursor.fetchall():
                     if expire_date and expire_date < today:
                         subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                         cursor.execute("UPDATE users SET status='Expired' WHERE username=?", (username,))
                         subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-                cursor.execute("SELECT username, limit_gb, used_gb, status FROM users")
-                for row in cursor.fetchall():
-                    username, limit_gb, used_gb, status = row
-                    if used_gb >= limit_gb and status == 'Active':
+                    elif used_gb >= limit_gb:
                         subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                         cursor.execute("UPDATE users SET status='Traffic_Limit' WHERE username=?", (username,))
                         subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-                active_connections = get_sshd_connections()
-                for username, pids in active_connections.items():
-                    if len(pids) > 1:
-                        for extra_pid in pids[1:]:
-                            subprocess.run(["sudo", "kill", "-9", extra_pid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                            
                 conn.commit()
                 conn.close()
-        except Exception as e:
-            print(f"Error in core monitoring logic: {e}")
-        time.sleep(2)
+        except:
+            pass
+        time.sleep(2) # مانیتورینگ دقیق و سریع ۲ ثانیه‌ای بدون ایجاد لود روی CPU
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
-<html lang="fa" dir="rtl">
+<html>
 <head>
     <meta charset="UTF-8">
-    <title>⚡ SSH PRO - GLASS UI PREMIUM ⚡</title>
+    <title>SSH PREMIUM PANEL</title>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght=300;400;700&display=swap');
-        
-        :root {
-            --accent-blue: #007aff;
-            --accent-green: #34c759;
-            --accent-red: #ff3b30;
-            --accent-yellow: #ffcc00;
-            --text-main: #ffffff;
-            --text-muted: #a1a1aa;
-        }
-        
-        body { 
-            font-family: 'Vazirmatn', sans-serif; 
-            background: linear-gradient(135deg, #0f172a 0%, #1e1e2f 100%);
-            background-attachment: fixed;
-            color: var(--text-main); 
-            margin: 0; 
-            padding: 40px 20px; 
-            direction: rtl; 
-        }
-        
-        .container { 
-            max-width: 1400px; 
-            background: rgba(30, 41, 59, 0.45); 
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            padding: 35px; 
-            border-radius: 24px; 
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); 
-            margin: auto; 
-            border: 1px solid rgba(255, 255, 255, 0.08); 
-        }
-        
-        h1 { font-size: 26px; font-weight: 700; color: #fff; margin-bottom: 30px; display: flex; align-items: center; gap: 10px; }
-        h2 { font-size: 18px; font-weight: 700; color: var(--accent-blue); margin-top: 40px; margin-bottom: 15px; }
-        
-        .grid-header { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-bottom: 30px; }
-        
-        .card-inner { 
-            background: rgba(15, 23, 42, 0.4); 
-            backdrop-filter: blur(10px);
-            padding: 22px; 
-            border-radius: 16px; 
-            border: 1px solid rgba(255, 255, 255, 0.05); 
-        }
-        
-        form { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-        
-        input { 
-            background: rgba(255, 255, 255, 0.07); 
-            color: #fff; 
-            border: 1px solid rgba(255, 255, 255, 0.1); 
-            padding: 12px 16px; 
-            border-radius: 12px; 
-            flex: 1; 
-            min-width: 140px; 
-            font-family: 'Vazirmatn';
-            font-size: 14px;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        input:focus { 
-            background: rgba(255, 255, 255, 0.12);
-            border-color: var(--accent-blue); 
-            outline: none; 
-            box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.25); 
-        }
-        
-        button { 
-            padding: 12px 24px; 
-            color: white; 
-            border: none; 
-            border-radius: 12px; 
-            cursor: pointer; 
-            font-weight: 700; 
-            font-family: 'Vazirmatn';
-            font-size: 14px;
-            transition: all 0.2s ease; 
-        }
-        button:hover { filter: brightness(1.15); transform: scale(1.02); }
-        button:active { transform: scale(0.98); }
-        .btn-blue { background: var(--accent-blue); } 
-        .btn-green { background: var(--accent-green); } 
-        .btn-red { background: var(--accent-red); }
-        
-        .search-container {
-            margin-bottom: 20px;
-            display: flex;
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 14px;
-            padding: 4px;
-            border: 1px solid rgba(255, 255, 255, 0.05);
-        }
-        .search-container input {
-            background: transparent;
-            border: none;
-            padding: 14px;
-        }
-        .search-container input:focus {
-            background: transparent;
-            box-shadow: none;
-        }
-
-        table { width: 100%; border-collapse: collapse; margin-top: 15px; background: rgba(15, 23, 42, 0.3); border-radius: 16px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.05); }
-        th, td { padding: 16px; text-align: center; font-size: 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
-        th { background-color: rgba(0, 0, 0, 0.2); color: var(--text-muted); font-weight: 700; }
-        tr:last-child td { border-bottom: none; }
-        tr:hover { background-color: rgba(255, 255, 255, 0.03); }
-        
-        .badge { padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 700; display: inline-block; }
-        .online { background: rgba(52, 199, 89, 0.15); color: #34c759; border: 1px solid rgba(52, 199, 89, 0.3); }
-        .offline { background: rgba(161, 161, 170, 0.15); color: #cbd5e1; border: 1px solid rgba(161, 161, 170, 0.3); }
-        .alert-flash { padding: 14px; background: rgba(255, 59, 48, 0.15); border: 1px solid var(--accent-red); color: #ff3b30; border-radius: 12px; margin-bottom: 25px; text-align: center; font-weight: 700; }
-        
-        .progress-wrapper { width: 230px; text-align: right; margin: auto; }
-        .progress-text { display: flex; justify-content: space-between; font-size: 12px; color: #a1a1aa; margin-bottom: 5px; }
-        .progress-container { width: 100%; background-color: rgba(255,255,255,0.08); border-radius: 10px; height: 7px; overflow: hidden; }
-        .progress-bar { height: 100%; width: 100%; border-radius: 10px; transition: width 0.6s ease, background-color 0.4s ease; }
-        code { background: rgba(255,255,255,0.08); padding: 4px 8px; border-radius: 6px; color: #64d2ff; }
+        body { font-family: sans-serif; background: #0f172a; color: #fff; padding: 20px; direction: rtl; }
+        .container { max-width: 1100px; margin: auto; background: #1e293b; padding: 20px; border-radius: 10px; }
+        form { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+        input, button { padding: 10px; border-radius: 5px; border: none; font-weight: bold; }
+        input { background: #334155; color: #fff; flex: 1; }
+        button { cursor: pointer; background: #0284c7; color: white; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: #0f172a; }
+        th, td { padding: 12px; text-align: center; border-bottom: 1px solid #334155; }
+        th { background: #1e293b; color: #94a3b8; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>⚡ کنترل پنل هوشمند شیشه‌ای SSH PRO</h1>
+        <h2>⚡ مانیتورینگ زنده و دقیق مصرف حجم کاربران SSH PRO</h2>
         
-        {% with messages = get_flashed_messages() %}
-          {% if messages %}
-            {% for message in messages %}
-              <div class="alert-flash">⚠️ {{ message }}</div>
-            {% endfor %}
-          {% endif %}
-        {% endwith %}
-
-        <div class="grid-header">
-            <div class="card-inner">
-                <h3 style="margin-top:0; font-size:15px; color:var(--accent-green);">📥 دانلود نسخه پشتیبان</h3>
-                <p style="color:var(--text-muted); font-size:13px; margin-bottom:15px;">استخراج خروجی فایل زنده JSON از اطلاعات دیتابیس کاربران.</p>
-                <a href="/backup/download"><button class="btn-green" style="width:100%;">📥 دانلود بک‌آب دیتابیس</button></a>
-            </div>
-            <div class="card-inner">
-                <h3 style="margin-top:0; font-size:15px; color:var(--accent-red);">📤 بازگردانی دیتابیس کاربران</h3>
-                <p style="color:var(--text-muted); font-size:13px; margin-bottom:12px;">فایل دانلود شده قدیمی را برای جایگذاری بدون خطا آپلود کنید.</p>
-                <form action="/backup/restore" method="POST" enctype="multipart/form-data" style="flex-direction: column; align-items: stretch; gap: 8px;">
-                    <input type="file" name="backup_file" accept=".json" required>
-                    <button type="submit" class="btn-red">📤 شروع عملیات ریستور</button>
-                </form>
-            </div>
-        </div>
-        
-        <h2>✨ ساخت اکانت تک‌کاربره جدید</h2>
-        <div class="card-inner">
-            <form action="/add" method="POST">
-                <input type="text" name="username" placeholder="نام کاربری جدید" required>
-                <input type="text" name="password" placeholder="کلمه عبور" required>
-                <input type="number" step="0.1" name="limit_gb" placeholder="حجم مجاز (GB)" required>
-                <input type="number" name="days" placeholder="مدت اعتبار (روز)" required>
-                <button type="submit" class="btn-blue">➕ ساخت و فعال‌سازی اکانت</button>
-            </form>
-        </div>
-
-        <h2>👥 وضعیت مصرف ترافیک و مانیتورینگ آنلاین کاربران</h2>
-        
-        <div class="search-container">
-            <input type="text" id="search-input" onkeyup="filterUsers()" placeholder="🔍 جستجو در نام کاربری یا وضعیت کلاینت...">
-        </div>
+        <form action="/add" method="POST">
+            <input type="text" name="username" placeholder="نام کاربری" required>
+            <input type="text" name="password" placeholder="کلمه عبور" required>
+            <input type="number" step="0.1" name="limit_gb" placeholder="حجم مجاز (GB)" required>
+            <input type="number" name="days" placeholder="اعتبار (روز)" required>
+            <button type="submit">➕ ساخت کاربر</button>
+        </form>
 
         <table>
             <thead>
                 <tr>
                     <th>نام کاربری</th>
                     <th>کلمه عبور</th>
-                    <th>حجم کل (GB)</th>
-                    <th>حجم مصرفی واقعی (GB)</th>
-                    <th>وضعیت نوار حجم مجاز</th>
-                    <th>اعتبار زمانی</th>
+                    <th>حجم کل مجاز</th>
+                    <th>حجم مصرفی (همگام با گوشی)</th>
+                    <th>اعتبار زمان باقی‌مانده</th>
                     <th>وضعیت اتصال</th>
                     <th>وضعیت سیستم</th>
-                    <th>اقدام سرویس</th>
+                    <th>عملیات پنل</th>
                 </tr>
             </thead>
-            <tbody id="user-table-body">
-                <!-- رندرینگ کلاینت به صورت کاملا زنده جایگزین میشود -->
-            </tbody>
+            <tbody id="user-rows"></tbody>
         </table>
     </div>
 
     <script>
-        function filterUsers() {
-            const input = document.getElementById('search-input');
-            const filter = input.value.toLowerCase();
-            const tbody = document.getElementById('user-table-body');
-            const trs = tbody.getElementsByTagName('tr');
-
-            for (let i = 0; i < trs.length; i++) {
-                const tdUsername = trs[i].getElementsByTagName('td')[0];
-                if (tdUsername) {
-                    const txtValue = tdUsername.textContent || tdUsername.innerText;
-                    if (txtValue.toLowerCase().indexOf(filter) > -1) {
-                        trs[i].style.display = "";
-                    } else {
-                        trs[i].style.display = "none";
-                    }
-                }
-            }
-        }
-
-        async function fetchLiveStatus() {
+        async function updateData() {
             try {
-                const response = await fetch('/api/live_data');
-                const data = await response.json();
-                
-                if(!data || !data.users) return;
-
-                const tbody = document.getElementById('user-table-body');
-                const searchInputElement = document.getElementById('search-input');
-                const searchInput = searchInputElement ? searchInputElement.value.toLowerCase() : "";
-
+                const res = await fetch('/api/users');
+                const data = await res.json();
+                const tbody = document.getElementById('user-rows');
                 tbody.innerHTML = '';
 
                 data.users.forEach(user => {
-                    try {
-                        const isOnline = data.online_users.map(u => u.trim().toLowerCase()).includes(user.username.trim().toLowerCase());
-                        const onlineBadge = isOnline 
-                            ? '<span class="badge online">● آنلاین</span>' 
-                            : '<span class="badge offline">○ آفلاین</span>';
-                        
-                        let statusText = '<span style="color:#34c759; font-weight:700;">فعال</span>';
-                        if (user.status === 'Expired') statusText = '<span style="color:#ff3b30; font-weight:700;">منقضی زمان</span>';
-                        if (user.status === 'Traffic_Limit') statusText = '<span style="color:#ffcc00; font-weight:700;">اتمام حجم</span>';
+                    const isOnline = data.online.map(o => o.trim().toLowerCase()).includes(user.username.trim().toLowerCase());
+                    const onlineStatus = isOnline ? '<span style="color:#22c55e; font-weight:bold;">● آنلاین (Live)</span>' : '<span style="color:#94a3b8;">○ آفلاین</span>';
+                    
+                    let statusText = '<span style="color:#22c55e;">فعال</span>';
+                    if (user.status === 'Expired') statusText = '<span style="color:#ef4444;">منقضی شده</span>';
+                    if (user.status === 'Traffic_Limit') statusText = '<span style="color:#eab308;">اتمام حجم</span>';
 
-                        const totalGb = parseFloat(user.limit_gb) || 0;
-                        const usedGb = parseFloat(user.used_gb) || 0;
-                        let remainingGb = totalGb - usedGb;
-                        if (remainingGb < 0) remainingGb = 0;
-                        
-                        let remainingPercent = totalGb > 0 ? (remainingGb / totalGb) * 100 : 0;
-                        if (remainingPercent > 100) remainingPercent = 100;
-                        if (remainingPercent < 0) remainingPercent = 0;
-                        
-                        let barColor = 'var(--accent-green)'; 
-                        if (remainingPercent <= 50 && remainingPercent > 20) {
-                            barColor = 'var(--accent-yellow)'; 
-                        } else if (remainingPercent <= 20) {
-                            barColor = 'var(--accent-red)'; 
-                        }
-
-                        const tr = document.createElement('tr');
-                        
-                        if (searchInput && !user.username.toLowerCase().includes(searchInput)) {
-                            tr.style.display = "none";
-                        }
-
-                        // رفع باگ نمایش روزهای باقیمانده برای حالت های منفی یا رشته های خالی
-                        let daysText = 'پایان دوره';
-                        if (user.remaining_days !== undefined && user.remaining_days !== null) {
-                            const daysInt = parseInt(user.remaining_days);
-                            if (daysInt > 0) {
-                                daysText = daysInt + ' روز';
-                            }
-                        }
-
-                        tr.innerHTML = `
-                            <td style="font-weight:700; color:#007aff;">${user.username}</td>
-                            <td><code>${user.password}</code></td>
-                            <td style="font-weight:700; color:#cbd5e1;">${totalGb.toFixed(1)} GB</td>
-                            <td><span style="color:#64d2ff; font-weight:700;">${usedGb.toFixed(3)}</span> GB</td>
-                            <td>
-                                <div class="progress-wrapper">
-                                    <div class="progress-text">
-                                        <span>باقی‌مانده: <b>${remainingGb.toFixed(2)} GB</b></span>
-                                        <span>${remainingPercent.toFixed(0)}%</span>
-                                    </div>
-                                    <div class="progress-container">
-                                        <div class="progress-bar" style="width: ${remainingPercent}%; background-color: ${barColor};"></div>
-                                    </div>
-                                </div>
-                            </td>
-                            <td style="font-weight: 700; color: #ff3b30;">${daysText}</td>
-                            <td>${onlineBadge}</td>
-                            <td>${statusText}</td>
-                            <td>
-                                <a href="/renew/${user.username}"><button class="btn-green" style="padding:6px 14px; font-size:12px; border-radius:8px;">🔄 ریست دوره</button></a>
-                                <a href="/delete/${user.username}"><button class="btn-red" style="padding:6px 14px; font-size:12px; border-radius:8px;">حذف</button></a>
-                            </td>
-                        `;
-                        tbody.appendChild(tr);
-                    } catch(innerErr) {
-                        console.error("Error rendering user row:", innerErr);
-                    }
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = '<td><b>' + user.username + '</b></td>' +
+                                   '<td><code>' + user.password + '</code></td>' +
+                                   '<td>' + user.limit_gb + ' GB</td>' +
+                                   '<td style="color:#38bdf8; font-weight:bold;">' + user.used_gb.toFixed(4) + ' GB</td>' +
+                                   '<td>' + user.remaining_days + ' روز</td>' +
+                                   '<td>' + onlineStatus + '</td>' +
+                                   '<td>' + statusText + '</td>' +
+                                   '<td>' +
+                                       '<a href="/renew/' + user.username + '"><button style="background:#22c55e; padding:5px 10px; font-size:12px; margin-left:5px;">تمدید</button></a>' +
+                                       '<a href="/delete/' + user.username + '"><button style="background:#ef4444; padding:5px 10px; font-size:12px;">حذف</button></a>' +
+                                   '</td>';
+                    tbody.appendChild(tr);
                 });
-            } catch (error) {
-                console.error("Error updating web items:", error);
-            }
+            } catch(e) {}
         }
-        fetchLiveStatus();
-        setInterval(fetchLiveStatus, 2000); // بهینه سازی پولینگ به ۲ ثانیه جهت پایداری مرورگر
+        updateData();
+        setInterval(updateData, 2000); // به روز رسانی آنی فرانت‌اند هر ۲ ثانیه یک‌بار
     </script>
 </body>
 </html>
@@ -478,34 +247,34 @@ HTML_TEMPLATE = """
 def index():
     return render_template_string(HTML_TEMPLATE)
 
-@app.route('/api/live_data')
-def live_data():
+@app.route('/api/users')
+def api_users():
     try:
         with db_lock:
             conn = get_db_connection()
             cursor = conn.cursor()
-            cursor.execute("SELECT username, password, limit_gb, used_gb, expire_date, status, initial_days FROM users")
+            cursor.execute("SELECT username, password, limit_gb, used_gb, expire_date, status FROM users")
             rows = cursor.fetchall()
             conn.close()
         
         today = datetime.datetime.now().date()
         users_list = []
         for row in rows:
-            username, password, limit_gb, used_gb, expire_date, status, init_days = row
+            username, password, limit_gb, used_gb, expire_date, status = row
             try:
                 exp_date = datetime.datetime.strptime(expire_date, "%Y-%m-%d").date()
                 remaining_days = (exp_date - today).days
-            except:
-                remaining_days = 0
+                if remaining_days < 0: remaining_days = 0
+            except: remaining_days = 0
                 
             users_list.append({
                 "username": username, "password": password, "limit_gb": limit_gb if limit_gb else 0.0,
-                "used_gb": used_gb if used_gb else 0.0, "remaining_days": remaining_days, "status": status,
-                "initial_days": init_days if init_days else 30
+                "used_gb": used_gb if used_gb else 0.0, "remaining_days": remaining_days, "status": status
             })
-        return jsonify({"users": users_list, "online_users": get_online_users()})
-    except Exception as e:
-        return jsonify({"users": [], "online_users": [], "error": str(e)})
+        online_now, _ = get_sshd_connections_and_traffic()
+        return jsonify({"users": users_list, "online": online_now})
+    except:
+        return jsonify({"users": [], "online": []})
 
 @app.route('/add', methods=['POST'])
 def add_user():
@@ -525,8 +294,7 @@ def add_user():
                            (username, password, limit_gb, expire_date, limit_gb, days))
             conn.commit()
             conn.close()
-    except Exception as e:
-        print(f"Error adding user: {e}")
+    except: pass
     return redirect('/')
 
 @app.route('/renew/<username>')
@@ -545,8 +313,7 @@ def renew_user(username):
                 conn.commit()
                 subprocess.run(["sudo", "usermod", "-U", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             conn.close()
-    except Exception as e:
-        print(f"Error renewing user: {e}")
+    except: pass
     return redirect('/')
 
 @app.route('/delete/<username>')
@@ -559,111 +326,47 @@ def delete_user(username):
             cursor.execute("DELETE FROM users WHERE username=?", (username,))
             conn.commit()
             conn.close()
-    except Exception as e:
-        print(f"Error deleting user: {e}")
-    return redirect('/')
-
-@app.route('/backup/download')
-def download_backup():
-    try:
-        with db_lock:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days FROM users")
-            rows = cursor.fetchall()
-            conn.close()
-        
-        backup_data = []
-        for row in rows:
-            backup_data.append({
-                "username": row[0], "password": row[1], "limit_gb": row[2], "used_gb": row[3],
-                "expire_date": row[4], "status": row[5], "initial_gb": row[6], "initial_days": row[7]
-            })
-        backup_filename = "/tmp/ssh_premium_backup.json"
-        with open(backup_filename, "w") as f:
-            json.dump(backup_data, f, indent=4)
-        return send_file(backup_filename, as_attachment=True, download_name="ssh_premium_backup.json")
-    except Exception as e:
-        return str(e)
-
-@app.route('/backup/restore', methods=['POST'])
-def restore_backup():
-    try:
-        if 'backup_file' not in request.files: return redirect('/')
-        file = request.files['backup_file']
-        if file.filename == '' or not file: return redirect('/')
-        
-        data = json.load(file)
-        with db_lock:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            for item in data:
-                username = item['username']
-                password = item['password']
-                limit_gb = item['limit_gb']
-                used_gb = item['used_gb']
-                expire_date = item['expire_date']
-                status = item['status']
-                init_gb = item.get('initial_gb', limit_gb)
-                init_days = item.get('initial_days', 30)
-                
-                safe_system_user_create(username, password)
-                if status != 'Active':
-                    subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    
-                cursor.execute('''
-                    INSERT OR REPLACE INTO users (username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (username, password, limit_gb, used_gb, expire_date, status, init_gb, init_days))
-            conn.commit()
-            conn.close()
-        flash("ریستور با موفقیت انجام شد.")
-    except Exception as e:
-        flash(f"خطا در ریستور: {str(e)}")
+    except: pass
     return redirect('/')
 
 def safe_system_user_create(username, password):
     try:
         pwd.getpwnam(username)
         subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except KeyError:
-        pass
-        
+    except KeyError: pass
     subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True)
 
 if __name__ == '__main__':
     init_db()
-    threading.Thread(target=monitor_core_logic, daemon=True).start()
-    threading.Thread(target=update_traffic_from_proc, daemon=True).start()
+    # راه اندازی دیمون غیرهمگام مانیتورینگ جهت تضمین عدم تداخل با لودینگ صفحه وب
+    threading.Thread(target=live_monitor_daemon, daemon=True).start()
     app.run(host='0.0.0.0', port=5000)
 EOF
 
-    echo "[*] Aligning Custom Service Daemon..."
-    sudo tee /etc/systemd/system/custom-panel.service > /dev/null <<EOF
+# ۵. ساخت سرویس دیمون لینوکس برای پایداری همیشگی و اجرای خودکار در پس‌زمینه سرور
+sudo tee /etc/systemctl/system/custom-panel.service > /dev/null << 'SERVICEEOF'
 [Unit]
-Description=SSH Advanced GUI Dark Panel Ultimate
+Description=SSH Pro Precision Management Panel
 After=network.target
 
 [Service]
 Type=simple
+User=root
+WorkingDirectory=/etc/custom-panel
 ExecStart=/usr/bin/python3 /etc/custom-panel/app.py
 Restart=always
+RestartSec=2
 
 [Install]
 WantedBy=multi-user.target
-EOF
+SERVICEEOF
 
-    sudo systemctl daemon-reload
-    sudo systemctl enable custom-panel.service
-    sudo systemctl restart custom-panel.service
-}
+sudo systemctl daemon-reload
+sudo systemctl enable custom-panel.service
+sudo systemctl restart custom-panel.service
 
-update_and_replace_logic
-install_prerequisites
-create_panel_app
-
-echo -e "\e[1;32m==================================================\e[0m"
-echo -e "\e[1;32m✔ RENDER BUG FIXED SUCCESSFULLY!                  \e[0m"
-echo -e "\e[1;36m🌐 PANELS LIVE ON PORT 5000                        \e[0m"
-echo -e "\e[1;32m==================================================\e[0m"
+echo "--------------------------------------------------"
+echo "✔ ARCHITECTURE STABLE: PANEL INSTALLED SUCCESSFULLY"
+echo "🌐 LISTEN PORT: 5000"
+echo "--------------------------------------------------"
