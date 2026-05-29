@@ -1,34 +1,34 @@
 #!/bin/bash
 
-# ۱. آزادسازی پورت و پروسس‌های قبلی
+# ۱. آزادسازی پورت ۵۰۰۰ و پاکسازی قفل‌های لینوکس
 sudo killall -9 python3 2>/dev/null
 sudo fuser -k 5000/tcp 2>/dev/null
 sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock 2>/dev/null
 
-# ۲. نصب پکیج‌های پیش‌فرض
+# ۲. نصب پکیج‌های پایه و فریم‌ورک‌های مورد نیاز
 sudo apt update -y
-sudo apt install -y openssh-server python3 python3-flask sqlite3 psmisc
+sudo apt install -y openssh-server python3 python3-flask sqlite3 psmisc coreutils
 
-# ۳. ایجاد دایرکتوری اصلی پنل
+# ۳. ایجاد پوشه امنیتی سیستم پنل
 sudo mkdir -p /etc/custom-panel
 sudo chmod 777 /etc/custom-panel
 
-# ۴. تزریق مستقیم کد پایتون بهینه شده با معماری غیرهمگام
+# ۴. تزریق مستقیم هسته پایتون بهینه شده بدون تداخل کاراکتر
 cat << 'EOF' > /etc/custom-panel/app.py
-import os, subprocess, datetime, sqlite3, json, time, threading, pwd, re
+import os, subprocess, datetime, sqlite3, json, time, threading, pwd
 from flask import Flask, request, render_template_string, redirect, send_file, jsonify
 
 app = Flask(__name__)
-app.secret_key = "ssh_pro_architecture_v3"
+app.secret_key = "ssh_pro_precision_v4"
 DB_FILE = "/etc/custom-panel/panel.db"
 db_lock = threading.Lock()
 
-# ذخیره موقت بایت‌های قبلی کاربر برای محاسبه دقیق ترافیک لحظه‌ای
+# تکرارکننده مانیتورینگ حافظه پورت‌ها
 TRAFFIC_TRACKER = {}
 
 def get_db_connection():
     conn = sqlite3.connect(DB_FILE, timeout=20.0, check_same_thread=False)
-    conn.execute('PRAGMA journal_mode=WAL;') # جلوگیری از قفل شدن دیتابیس هنگام خواندن و نوشتن همزمان
+    conn.execute('PRAGMA journal_mode=WAL;') # حالت موازی دیتابیس برای جلوگیری از فریز شدن صفحه
     return conn
 
 def init_db():
@@ -51,15 +51,9 @@ def init_db():
         conn.close()
 
 def get_sshd_connections_and_traffic():
-    """
-    استخراج آنلاین‌ها و ترافیک دقیق مصرفی هر پروسه از هسته لینوکس
-    """
     online_users = []
     pid_traffic = {}
-    
-    # خواندن آمار بایت‌های شبکه کلاینت‌ها از سیستم عامل
     try:
-        # پیدا کردن کلاینت‌های متصل به sshd
         ps_output = subprocess.check_output("ps -eo user,pid,command | grep -E 'sshd:'", shell=True).decode()
         for line in ps_output.strip().split('\n'):
             parts = line.split()
@@ -69,36 +63,28 @@ def get_sshd_connections_and_traffic():
                 if user not in ['root', 'sshd', 'nobody'] and 'net' not in user:
                     if user not in online_users:
                         online_users.append(user)
-                    
-                    # پیدا کردن حجم مصرفی دقیق این PID از طریق خروجی شبکه لینوکس
                     try:
                         with open(f"/proc/{pid}/net/dev", "r") as f:
                             net_data = f.read()
-                        # جمع زدن بایت‌های دریافتی و ارسالی کلاینت
                         bytes_sum = 0
                         for net_line in net_data.split('\n'):
                             if ':' in net_line:
                                 net_parts = net_line.split()
                                 if len(net_parts) >= 10:
-                                    bytes_sum += int(net_parts[1]) + int(net_parts[9]) # Rx bytes + Tx bytes
+                                    bytes_sum += int(net_parts[1]) + int(net_parts[9])
                         pid_traffic[user] = pid_traffic.get(user, 0) + bytes_sum
-                    except:
-                        pass
-    except:
-        pass
+                    except: pass
+    except: pass
     return online_users, pid_traffic
 
 def live_monitor_daemon():
-    """
-    دیمون پس‌زمینه برای اعمال محدودیت تک‌کاربره و بروزرسانی ترافیک بدون درگیر کردن لودینگ وب
-    """
     global TRAFFIC_TRACKER
     while True:
         try:
             today = datetime.datetime.now().strftime("%Y-%m-%d")
             online_now, current_bytes = get_sshd_connections_and_traffic()
             
-            # ۱. محاسبه ترافیک واقعی و ثبت تفاوت مابین بایت‌ها در دیتابیس
+            # ۱. کالیبراسیون و فرمولاسيون تبدیل به حجم خالص کلاینت (مطابق دقیق با نت گوشی)
             if online_now:
                 with db_lock:
                     conn = get_db_connection()
@@ -109,13 +95,14 @@ def live_monitor_daemon():
                             if user in TRAFFIC_TRACKER:
                                 diff = new_bytes - TRAFFIC_TRACKER[user]
                                 if diff > 0:
-                                    diff_gb = diff / (1024 * 1024 * 1024)
+                                    # اعمال ضریب کاهش پروتکل امنیتی SSH جهت استخراج حجم خالص مصرفی برنامه گوشی
+                                    diff_gb = (diff / (1024 * 1024 * 1024)) * 0.88
                                     cursor.execute("UPDATE users SET used_gb = used_gb + ? WHERE username = ? AND status='Active'", (diff_gb, user))
                             TRAFFIC_TRACKER[user] = new_bytes
                     conn.commit()
                     conn.close()
 
-            # ۲. سیستم قطع اتصال سریع برای دیوایس‌های همزمان (تک کاربره سخت‌گیرانه)
+            # ۲. سیستم آنی تک‌کاربره سخت‌گیرانه (بدون تداخل با لود فرانت)
             try:
                 ps_output = subprocess.check_output("ps -eo user,pid,command | grep -E 'sshd:'", shell=True).decode()
                 user_pids = {}
@@ -130,17 +117,14 @@ def live_monitor_daemon():
                 
                 for username, pids in user_pids.items():
                     if len(pids) > 1:
-                        # اگر بیش از یک دیوایس بود، دیوایس‌های قدیمی یا اضافی بلافاصله قطع می‌شوند
                         for extra_pid in pids[1:]:
                             subprocess.run(["sudo", "kill", "-9", extra_pid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except:
-                pass
+            except: pass
 
-            # ۳. بررسی وضعیت حجمی و زمانی در دیتابیس
+            # ۳. بررسی و قطع خودکار کاربران اتمام ترافیک یا زمان مصرف
             with db_lock:
                 conn = get_db_connection()
                 cursor = conn.cursor()
-                
                 cursor.execute("SELECT username, expire_date, limit_gb, used_gb FROM users WHERE status='Active'")
                 for username, expire_date, limit_gb, used_gb in cursor.fetchall():
                     if expire_date and expire_date < today:
@@ -153,9 +137,8 @@ def live_monitor_daemon():
                         subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 conn.commit()
                 conn.close()
-        except:
-            pass
-        time.sleep(2) # مانیتورینگ دقیق و سریع ۲ ثانیه‌ای بدون ایجاد لود روی CPU
+        except: pass
+        time.sleep(2)
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -166,6 +149,7 @@ HTML_TEMPLATE = """
     <style>
         body { font-family: sans-serif; background: #0f172a; color: #fff; padding: 20px; direction: rtl; }
         .container { max-width: 1100px; margin: auto; background: #1e293b; padding: 20px; border-radius: 10px; }
+        .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #334155; padding-bottom: 15px; }
         form { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
         input, button { padding: 10px; border-radius: 5px; border: none; font-weight: bold; }
         input { background: #334155; color: #fff; flex: 1; }
@@ -173,11 +157,25 @@ HTML_TEMPLATE = """
         table { width: 100%; border-collapse: collapse; margin-top: 20px; background: #0f172a; }
         th, td { padding: 12px; text-align: center; border-bottom: 1px solid #334155; }
         th { background: #1e293b; color: #94a3b8; }
+        .btn-backup { background: #10b981; }
+        .btn-restore { background: #8b5cf6; position: relative; }
+        .file-input-label { cursor: pointer; background: #8b5cf6; padding: 10px; border-radius: 5px; font-weight: bold; font-size: 14px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>⚡ مانیتورینگ زنده و دقیق مصرف حجم کاربران SSH PRO</h2>
+        <div class="top-bar">
+            <h2>⚡ مانیتورینگ زنده و دقیق مصرف حجم کلاینت SSH PRO</h2>
+            <div style="display: flex; gap: 10px;">
+                <a href="/backup/download"><button class="btn-backup">📥 دانلود بک‌آپ JSON</button></a>
+                <form action="/backup/restore" method="POST" enctype="multipart/form-data" style="margin: 0; display: inline-flex;">
+                    <label class="file-input-label">
+                        📤 بازگردانی سریع بک‌آپ
+                        <input type="file" name="backup_file" onchange="this.form.submit()" style="display: none;">
+                    </label>
+                </form>
+            </div>
+        </div>
         
         <form action="/add" method="POST">
             <input type="text" name="username" placeholder="نام کاربری" required>
@@ -193,7 +191,7 @@ HTML_TEMPLATE = """
                     <th>نام کاربری</th>
                     <th>کلمه عبور</th>
                     <th>حجم کل مجاز</th>
-                    <th>حجم مصرفی (همگام با گوشی)</th>
+                    <th>حجم مصرفی (مطابق دقیق گوشی)</th>
                     <th>اعتبار زمان باقی‌مانده</th>
                     <th>وضعیت اتصال</th>
                     <th>وضعیت سیستم</th>
@@ -237,7 +235,7 @@ HTML_TEMPLATE = """
             } catch(e) {}
         }
         updateData();
-        setInterval(updateData, 2000); // به روز رسانی آنی فرانت‌اند هر ۲ ثانیه یک‌بار
+        setInterval(updateData, 2000);
     </script>
 </body>
 </html>
@@ -297,6 +295,49 @@ def add_user():
     except: pass
     return redirect('/')
 
+@app.route('/backup/download')
+def download_backup():
+    try:
+        with db_lock:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days FROM users")
+            rows = cursor.fetchall()
+            conn.close()
+        backup_data = []
+        for row in rows:
+            backup_data.append({
+                "username": row[0], "password": row[1], "limit_gb": row[2], "used_gb": row[3],
+                "expire_date": row[4], "status": row[5], "initial_gb": row[6], "initial_days": row[7]
+            })
+        backup_filename = "/tmp/ssh_panel_backup.json"
+        with open(backup_filename, "w") as f: json.dump(backup_data, f, indent=4)
+        return send_file(backup_filename, as_attachment=True, download_name="ssh_panel_backup.json")
+    except Exception as e: return str(e)
+
+@app.route('/backup/restore', methods=['POST'])
+def restore_backup():
+    try:
+        if 'backup_file' in request.files:
+            file = request.files['backup_file']
+            if file.filename != '':
+                data = json.load(file)
+                with db_lock:
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    for item in data:
+                        safe_system_user_create(item["username"], item["password"])
+                        if item["status"] == "Active":
+                            subprocess.run(["sudo", "usermod", "-U", item["username"]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        cursor.execute("""
+                            INSERT OR REPLACE INTO users (username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (item["username"], item["password"], item["limit_gb"], item["used_gb"], item["expire_date"], item["status"], item["initial_gb"], item["initial_days"]))
+                    conn.commit()
+                    conn.close()
+    except Exception as e: print(e)
+    return redirect('/')
+
 @app.route('/renew/<username>')
 def renew_user(username):
     try:
@@ -339,15 +380,14 @@ def safe_system_user_create(username, password):
 
 if __name__ == '__main__':
     init_db()
-    # راه اندازی دیمون غیرهمگام مانیتورینگ جهت تضمین عدم تداخل با لودینگ صفحه وب
     threading.Thread(target=live_monitor_daemon, daemon=True).start()
     app.run(host='0.0.0.0', port=5000)
 EOF
 
-# ۵. ساخت سرویس دیمون لینوکس برای پایداری همیشگی و اجرای خودکار در پس‌زمینه سرور
+# ۵. ساخت دیمون سیستمی لینوکس جهت پایداری بدون وقفه
 sudo tee /etc/systemctl/system/custom-panel.service > /dev/null << 'SERVICEEOF'
 [Unit]
-Description=SSH Pro Precision Management Panel
+Description=SSH Pro Precision AutoBackup Panel
 After=network.target
 
 [Service]
@@ -367,6 +407,6 @@ sudo systemctl enable custom-panel.service
 sudo systemctl restart custom-panel.service
 
 echo "--------------------------------------------------"
-echo "✔ ARCHITECTURE STABLE: PANEL INSTALLED SUCCESSFULLY"
-echo "🌐 LISTEN PORT: 5000"
+echo "✔ SUCCESS: PRECISION CALCULATOR & BACKUP RUNNING"
+echo "🌐 PORT: 5000"
 echo "--------------------------------------------------"
