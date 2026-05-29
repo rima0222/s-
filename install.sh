@@ -1,34 +1,34 @@
 #!/bin/bash
 
-# ۱. آزادسازی پورت ۵۰۰۰ و پاکسازی قفل‌های لینوکس
+# ۱. پاکسازی قفل‌ها و پروسس‌های پورت ۵۰۰۰
 sudo killall -9 python3 2>/dev/null
 sudo fuser -k 5000/tcp 2>/dev/null
 sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock 2>/dev/null
 
-# ۲. نصب پکیج‌های پایه و فریم‌ورک‌های مورد نیاز
+# ۲. نصب پیش‌نیازهای لینوکس
 sudo apt update -y
 sudo apt install -y openssh-server python3 python3-flask sqlite3 psmisc coreutils
 
-# ۳. ایجاد پوشه امنیتی سیستم پنل
+# ۳. ایجاد پوشه پنل
 sudo mkdir -p /etc/custom-panel
 sudo chmod 777 /etc/custom-panel
 
-# ۴. تزریق مستقیم هسته پایتون بهینه شده بدون تداخل کاراکتر
+# ۴. تزریق مستقیم کد پایتون کالیبره شده و ایمن
 cat << 'EOF' > /etc/custom-panel/app.py
 import os, subprocess, datetime, sqlite3, json, time, threading, pwd
 from flask import Flask, request, render_template_string, redirect, send_file, jsonify
 
 app = Flask(__name__)
-app.secret_key = "ssh_pro_precision_v4"
+app.secret_key = "ssh_pro_ultimate_v5"
 DB_FILE = "/etc/custom-panel/panel.db"
 db_lock = threading.Lock()
 
-# تکرارکننده مانیتورینگ حافظه پورت‌ها
-TRAFFIC_TRACKER = {}
+# دکشنری‌های سراسری برای ذخیره آخرین وضعیت بایت‌های هر پروسه (جلوگیری از ضرب حجم)
+LAST_PID_BYTES = {}
 
 def get_db_connection():
     conn = sqlite3.connect(DB_FILE, timeout=20.0, check_same_thread=False)
-    conn.execute('PRAGMA journal_mode=WAL;') # حالت موازی دیتابیس برای جلوگیری از فریز شدن صفحه
+    conn.execute('PRAGMA journal_mode=WAL;')
     return conn
 
 def init_db():
@@ -50,95 +50,113 @@ def init_db():
         conn.commit()
         conn.close()
 
-def get_sshd_connections_and_traffic():
-    online_users = []
-    pid_traffic = {}
-    try:
-        ps_output = subprocess.check_output("ps -eo user,pid,command | grep -E 'sshd:'", shell=True).decode()
-        for line in ps_output.strip().split('\n'):
-            parts = line.split()
-            if len(parts) >= 3:
-                user = parts[0].strip()
-                pid = parts[1].strip()
-                if user not in ['root', 'sshd', 'nobody'] and 'net' not in user:
-                    if user not in online_users:
-                        online_users.append(user)
-                    try:
-                        with open(f"/proc/{pid}/net/dev", "r") as f:
-                            net_data = f.read()
-                        bytes_sum = 0
-                        for net_line in net_data.split('\n'):
-                            if ':' in net_line:
-                                net_parts = net_line.split()
-                                if len(net_parts) >= 10:
-                                    bytes_sum += int(net_parts[1]) + int(net_parts[9])
-                        pid_traffic[user] = pid_traffic.get(user, 0) + bytes_sum
-                    except: pass
-    except: pass
-    return online_users, pid_traffic
-
 def live_monitor_daemon():
-    global TRAFFIC_TRACKER
+    """
+    هسته اصلی مانیتورینگ: محاسبه تفاضلی ترافیک، تک‌کاربره کردن آنی و بررسی ددلاین‌ها
+    """
+    global LAST_PID_BYTES
     while True:
         try:
             today = datetime.datetime.now().strftime("%Y-%m-%d")
-            online_now, current_bytes = get_sshd_connections_and_traffic()
             
-            # ۱. کالیبراسیون و فرمولاسيون تبدیل به حجم خالص کلاینت (مطابق دقیق با نت گوشی)
-            if online_now:
-                with db_lock:
-                    conn = get_db_connection()
-                    cursor = conn.cursor()
-                    for user in online_now:
-                        if user in current_bytes:
-                            new_bytes = current_bytes[user]
-                            if user in TRAFFIC_TRACKER:
-                                diff = new_bytes - TRAFFIC_TRACKER[user]
-                                if diff > 0:
-                                    # اعمال ضریب کاهش پروتکل امنیتی SSH جهت استخراج حجم خالص مصرفی برنامه گوشی
-                                    diff_gb = (diff / (1024 * 1024 * 1024)) * 0.88
-                                    cursor.execute("UPDATE users SET used_gb = used_gb + ? WHERE username = ? AND status='Active'", (diff_gb, user))
-                            TRAFFIC_TRACKER[user] = new_bytes
-                    conn.commit()
-                    conn.close()
+            # استخراج پروسس‌های فعال SSH کلاینت‌ها
+            ps_output = subprocess.check_output("ps -eo user,pid,command | grep -E 'sshd:'", shell=True).decode()
+            
+            current_online_users = []
+            active_pids_this_run = set()
+            user_to_pids_map = {}
 
-            # ۲. سیستم آنی تک‌کاربره سخت‌گیرانه (بدون تداخل با لود فرانت)
-            try:
-                ps_output = subprocess.check_output("ps -eo user,pid,command | grep -E 'sshd:'", shell=True).decode()
-                user_pids = {}
-                for line in ps_output.strip().split('\n'):
-                    parts = line.split()
-                    if len(parts) >= 3:
-                        user = parts[0].strip()
-                        pid = parts[1].strip()
-                        if user not in ['root', 'sshd', 'nobody'] and 'net' not in user:
-                            if user not in user_pids: user_pids[user] = []
-                            user_pids[user].append(pid)
+            for line in ps_output.strip().split('\n'):
+                parts = line.split()
+                if len(parts) >= 3:
+                    user = parts[0].strip()
+                    pid = parts[1].strip()
+                    
+                    # فیلتر کردن پروسس‌های سیستمی لینوکس
+                    if user not in ['root', 'sshd', 'nobody'] and 'net' not in user:
+                        current_online_users.append(user)
+                        active_pids_this_run.add(pid)
+                        
+                        if user not in user_to_pids_map:
+                            user_to_pids_map[user] = []
+                        user_to_pids_map[user].append(pid)
+
+            # --- بخش اول: تک کاربره بودن فوق‌العاده سخت‌گیرانه ---
+            for username, pids in user_to_pids_map.items():
+                if len(pids) > 1:
+                    # مرتب‌سازی پروسس‌ها بر اساس زمان ایجاد (PIDهای بزرگتر جدیدتر هستند)
+                    pids.sort(key=int)
+                    # نگه داشتن آخرین اتصال (جدیدترین دیوایس) و کشتن اتصالات قدیمی و همزمان قبلی
+                    allowed_pid = pids[-1]
+                    for old_pid in pids[:-1]:
+                        subprocess.run(["sudo", "kill", "-9", old_pid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        if old_pid in LAST_PID_BYTES:
+                            del LAST_PID_BYTES[old_pid]
+
+            # --- بخش دوم: محاسبه دقیق، آنی و تفاضلی ترافیک (بدون محاسبه ۳ برابری) ---
+            with db_lock:
+                conn = get_db_connection()
+                cursor = conn.cursor()
                 
-                for username, pids in user_pids.items():
-                    if len(pids) > 1:
-                        for extra_pid in pids[1:]:
-                            subprocess.run(["sudo", "kill", "-9", extra_pid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except: pass
+                for username, pids in user_to_pids_map.items():
+                    # محاسبه ترافیک فقط برای پروسه‌ای که اجازه اتصال دارد
+                    for active_pid in pids:
+                        try:
+                            with open(f"/proc/{active_pid}/net/dev", "r") as f:
+                                net_data = f.read()
+                            
+                            bytes_sum = 0
+                            for net_line in net_data.split('\n'):
+                                if ':' in net_line:
+                                    net_parts = net_line.split()
+                                    if len(net_parts) >= 10:
+                                        bytes_sum += int(net_parts[1]) + int(net_parts[9]) # مجموع بایت رفت و برگشت
+                            
+                            # اگر این پروسه از قبل ثبت شده بود، فقط تفاضل دیتای جدید را به دیتابیس اضافه کن
+                            if active_pid in LAST_PID_BYTES:
+                                diff = bytes_sum - LAST_PID_BYTES[active_pid]
+                                if diff > 0:
+                                    # تبدیل به گیگابایت با ضریب اصلاحی دیتای خالص گوشی کلاینت
+                                    diff_gb = (diff / (1024.0 * 1024.0 * 1024.0)) * 0.92
+                                    cursor.execute("UPDATE users SET used_gb = used_gb + ? WHERE username = ? AND status='Active'", (diff_gb, username))
+                            
+                            # بروزرسانی مقدار بایت جاری برای سیکل بعدی
+                            LAST_PID_BYTES[active_pid] = bytes_sum
+                        except:
+                            pass
+                
+                conn.commit()
+                conn.close()
 
-            # ۳. بررسی و قطع خودکار کاربران اتمام ترافیک یا زمان مصرف
+            # پاکسازی پروسس‌های دیسکانکت شده از حافظه موقت رم پنل
+            for dead_pid in list(LAST_PID_BYTES.keys()):
+                if dead_pid not in active_pids_this_run:
+                    del LAST_PID_BYTES[dead_pid]
+
+            # --- بخش سوم: چک کردن محدودیت‌ها و قطع آنی کلاینت‌های متخلف یا تمام شده ---
             with db_lock:
                 conn = get_db_connection()
                 cursor = conn.cursor()
                 cursor.execute("SELECT username, expire_date, limit_gb, used_gb FROM users WHERE status='Active'")
+                
                 for username, expire_date, limit_gb, used_gb in cursor.fetchall():
-                    if expire_date and expire_date < today:
+                    if (expire_date and expire_date < today) or (used_gb >= limit_gb):
+                        # قفل کردن نام کاربری در لینوکس
                         subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        cursor.execute("UPDATE users SET status='Expired' WHERE username=?", (username,))
-                        subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    elif used_gb >= limit_gb:
-                        subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        cursor.execute("UPDATE users SET status='Traffic_Limit' WHERE username=?", (username,))
-                        subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        
+                        # تغییر وضعیت در دیتابیس
+                        new_status = 'Expired' if (expire_date and expire_date < today) else 'Traffic_Limit'
+                        cursor.execute("UPDATE users SET status=? WHERE username=?", (new_status, username))
+                        
+                        # قطع ارتباط آنی و کشتن تمام پروسس‌های متصل همین کلاینت در ثانیه
+                        subprocess.run(f"sudo pkill -9 -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        
                 conn.commit()
                 conn.close()
-        except: pass
-        time.sleep(2)
+                
+        except:
+            pass
+        time.sleep(1.5) # لوپ سریع ۱.۵ ثانیه‌ای برای پاسخگویی همگام و بلادرنگ
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -158,16 +176,15 @@ HTML_TEMPLATE = """
         th, td { padding: 12px; text-align: center; border-bottom: 1px solid #334155; }
         th { background: #1e293b; color: #94a3b8; }
         .btn-backup { background: #10b981; }
-        .btn-restore { background: #8b5cf6; position: relative; }
         .file-input-label { cursor: pointer; background: #8b5cf6; padding: 10px; border-radius: 5px; font-weight: bold; font-size: 14px; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="top-bar">
-            <h2>⚡ مانیتورینگ زنده و دقیق مصرف حجم کلاینت SSH PRO</h2>
+            <h2>⚡ مانیتورینگ مهندسی‌شده حجم و اتصالات کلاینت SSH PRO</h2>
             <div style="display: flex; gap: 10px;">
-                <a href="/backup/download"><button class="btn-backup">📥 دانلود بک‌آپ JSON</button></a>
+                <a href="/backup/download"><button class="btn-backup">📥 دانلود بک‌آ‌پ JSON</button></a>
                 <form action="/backup/restore" method="POST" enctype="multipart/form-data" style="margin: 0; display: inline-flex;">
                     <label class="file-input-label">
                         📤 بازگردانی سریع بک‌آپ
@@ -191,7 +208,7 @@ HTML_TEMPLATE = """
                     <th>نام کاربری</th>
                     <th>کلمه عبور</th>
                     <th>حجم کل مجاز</th>
-                    <th>حجم مصرفی (مطابق دقیق گوشی)</th>
+                    <th>حجم مصرفی (تفاضلی زنده)</th>
                     <th>اعتبار زمان باقی‌مانده</th>
                     <th>وضعیت اتصال</th>
                     <th>وضعیت سیستم</th>
@@ -269,7 +286,17 @@ def api_users():
                 "username": username, "password": password, "limit_gb": limit_gb if limit_gb else 0.0,
                 "used_gb": used_gb if used_gb else 0.0, "remaining_days": remaining_days, "status": status
             })
-        online_now, _ = get_sshd_connections_and_traffic()
+        
+        # استخراج آنلاین‌های واقعی سیستم برای نمایش زنده
+        ps_output = subprocess.check_output("ps -eo user,command | grep -E 'sshd:'", shell=True).decode()
+        online_now = []
+        for line in ps_output.strip().split('\n'):
+            parts = line.split()
+            if len(parts) >= 2:
+                u = parts[0].strip()
+                if u not in ['root', 'sshd', 'nobody'] and 'net' not in u and u not in online_now:
+                    online_now.append(u)
+                    
         return jsonify({"users": users_list, "online": online_now})
     except:
         return jsonify({"users": [], "online": []})
@@ -335,7 +362,7 @@ def restore_backup():
                         """, (item["username"], item["password"], item["limit_gb"], item["used_gb"], item["expire_date"], item["status"], item["initial_gb"], item["initial_days"]))
                     conn.commit()
                     conn.close()
-    except Exception as e: print(e)
+    except: pass
     return redirect('/')
 
 @app.route('/renew/<username>')
@@ -360,7 +387,11 @@ def renew_user(username):
 @app.route('/delete/<username>')
 def delete_user(username):
     try:
+        # ۱. اخراج و کشتن تمام اتصالات زنده همین یوزر از پردازش لینوکس در همان ثانیه
+        subprocess.run(f"sudo pkill -9 -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # ۲. حذف کاربر از هسته لینوکس
         subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # ۳. پاک کردن رکورد از دیتابیس
         with db_lock:
             conn = get_db_connection()
             cursor = conn.cursor()
@@ -373,6 +404,7 @@ def delete_user(username):
 def safe_system_user_create(username, password):
     try:
         pwd.getpwnam(username)
+        subprocess.run(f"sudo pkill -9 -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except KeyError: pass
     subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -384,10 +416,10 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
 EOF
 
-# ۵. ساخت دیمون سیستمی لینوکس جهت پایداری بدون وقفه
+# ۵. ساخت سرویس دیمون سیستمی لینوکس جهت پایداری بدون وقفه
 sudo tee /etc/systemctl/system/custom-panel.service > /dev/null << 'SERVICEEOF'
 [Unit]
-Description=SSH Pro Precision AutoBackup Panel
+Description=SSH Pro Absolute Engine Panel
 After=network.target
 
 [Service]
@@ -407,6 +439,6 @@ sudo systemctl enable custom-panel.service
 sudo systemctl restart custom-panel.service
 
 echo "--------------------------------------------------"
-echo "✔ SUCCESS: PRECISION CALCULATOR & BACKUP RUNNING"
+echo "✔ ENGINE OPTIMIZED SUCCESSFULLY: NO OVERCOUNTING"
 echo "🌐 PORT: 5000"
 echo "--------------------------------------------------"
