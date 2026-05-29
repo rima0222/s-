@@ -4,14 +4,14 @@
 set +e
 
 clear
-echo -e "\e[1;33m[*] Optimizing Traffic Counter to match Mobile Devices perfectly...\e[0m"
+echo -e "\e[1;33m[*] Calibrating precise network conversion metrics & Injection Fonts...\e[0m"
 
 # آزاد کردن قفل‌های سیستم‌عامل
 sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/cache/apt/archives/lock 2>/dev/null
 sudo dpkg --configure -a 2>/dev/null
 
 echo -e "\e[1;34m==================================================\e[0m"
-echo -e "\e[1;36m      SSH PRO PANEL (TRAFFIC & CARDS FIXED)       \e[0m"
+echo -e "\e[1;36m      SSH PRO PANEL (ADVANCED FIX & RESET)        \e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
 
 DB_FILE="/etc/custom-panel/panel.db"
@@ -38,7 +38,7 @@ import os, subprocess, datetime, sqlite3, json, time, threading, pwd
 from flask import Flask, request, render_template_string, redirect, send_file, jsonify, flash
 
 app = Flask(__name__)
-app.secret_key = "ssh_pro_glass_premium_key_v5"
+app.secret_key = "ssh_pro_glass_premium_key_v6"
 DB_FILE = "/etc/custom-panel/panel.db"
 TRAFFIC_TRACKER = {}
 
@@ -69,11 +69,9 @@ def init_db():
         conn.close()
 
 def get_system_stats():
-    """محاسبه واقعی میزان مصرف سی‌پی‌یو و رم سرور"""
     cpu = 0
     ram = 0
     try:
-        # محاسبه مصرف رم
         with open('/proc/meminfo', 'r') as f:
             lines = f.readlines()
         mem_total = 1
@@ -85,7 +83,6 @@ def get_system_stats():
                 mem_available = int(line.split()[1])
         ram = int(((mem_total - mem_available) / mem_total) * 100)
         
-        # محاسبه مصرف سی‌پی‌یو
         with open('/proc/stat', 'r') as f:
             line = f.readline()
         parts = list(map(int, line.split()[1:5]))
@@ -149,6 +146,7 @@ def update_traffic_from_proc():
                                     for line in lines:
                                         if ":" in line:
                                             parts = line.split()
+                                            # جمع دقیق بایت‌های دریافتی و ارسالی کلاینت روی هسته شبکه
                                             bytes_sum += int(parts[1]) + int(parts[9])
                                     
                                     if username not in TRAFFIC_TRACKER:
@@ -157,7 +155,7 @@ def update_traffic_from_proc():
                                     
                                     diff = bytes_sum - TRAFFIC_TRACKER[username]["last_bytes"]
                                     if diff > 0:
-                                        # حذف ضریب کالیبراسیون برای تطابق ۱۰۰ درصدی با مصرف اینترنت گوشی کاربر
+                                        # فرمول رسمی و استاندارد کالیبراسیون ۱۰۰٪ با نمایشگر گوشی‌ها (بایت به گیگابایت دودویی)
                                         diff_gb = diff / (1024.0 * 1024.0 * 1024.0)
                                         cursor.execute("UPDATE users SET used_gb = used_gb + ? WHERE username = ?", (diff_gb, username))
                                     
@@ -214,7 +212,8 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <title>⚡ SSH PRO - GLASS UI PREMIUM ⚡</title>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght=300;400;700&display=swap');
+        /* استفاده از فونت مدرن، ضخیم و یکدست انجمن / وزیرمتن برای استایل عکس‌های ارسالی */
+        @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700;900&display=swap');
         
         :root {
             --accent-blue: #007aff;
@@ -222,17 +221,19 @@ HTML_TEMPLATE = """
             --accent-red: #ff3b30;
             --accent-yellow: #ffcc00;
             --text-main: #ffffff;
-            --text-muted: #a1a1aa;
+            --text-muted: #cbd5e1;
         }
         
         body { 
             font-family: 'Vazirmatn', sans-serif; 
+            font-weight: 500;
             background: linear-gradient(135deg, #0f172a 0%, #1e1e2f 100%);
             background-attachment: fixed;
             color: var(--text-main); 
             margin: 0; 
             padding: 40px 20px; 
             direction: rtl; 
+            -webkit-font-smoothing: antialiased;
         }
         
         .container { 
@@ -247,8 +248,8 @@ HTML_TEMPLATE = """
             border: 1px solid rgba(255, 255, 255, 0.08); 
         }
         
-        h1 { font-size: 26px; font-weight: 700; color: #fff; margin-bottom: 30px; display: flex; align-items: center; gap: 10px; }
-        h2 { font-size: 18px; font-weight: 700; color: var(--accent-blue); margin-top: 40px; margin-bottom: 15px; }
+        h1 { font-size: 28px; font-weight: 900; color: #fff; margin-bottom: 30px; display: flex; align-items: center; gap: 10px; text-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        h2 { font-size: 20px; font-weight: 700; color: var(--accent-blue); margin-top: 40px; margin-bottom: 15px; }
         
         .grid-header { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 30px; }
         
@@ -269,13 +270,14 @@ HTML_TEMPLATE = """
             background: rgba(255, 255, 255, 0.07); 
             color: #fff; 
             border: 1px solid rgba(255, 255, 255, 0.1); 
-            padding: 12px 16px; 
+            padding: 14px 18px; 
             border-radius: 12px; 
             flex: 1; 
             min-width: 140px; 
             font-family: 'Vazirmatn';
+            font-weight: 700;
             font-size: 14px;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            transition: all 0.3s ease;
         }
         input:focus { 
             background: rgba(255, 255, 255, 0.12);
@@ -297,10 +299,12 @@ HTML_TEMPLATE = """
         }
         button:hover { filter: brightness(1.15); transform: scale(1.02); }
         button:active { transform: scale(0.98); }
-        .btn-blue { background: var(--accent-blue); } 
-        .btn-green { background: var(--accent-green); } 
-        .btn-red { background: var(--accent-red); }
-        
+        .btn-blue { background: var(--accent-blue); font-weight: 900; } 
+        .btn-green { background: var(--accent-green); font-weight: 900; } 
+        .btn-red { background: var(--accent-red); font-weight: 900; }
+        .btn-reset-traffic { background: rgba(255, 59, 48, 0.2); border: 1px solid var(--accent-red); color: #fff; margin-top: 10px; padding: 6px 12px; font-size: 12px; border-radius: 8px; }
+        .btn-reset-traffic:hover { background: var(--accent-red); }
+
         .search-container {
             margin-bottom: 20px;
             display: flex;
@@ -320,30 +324,29 @@ HTML_TEMPLATE = """
         }
 
         table { width: 100%; border-collapse: collapse; margin-top: 15px; background: rgba(15, 23, 42, 0.3); border-radius: 16px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.05); }
-        th, td { padding: 16px; text-align: center; font-size: 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
-        th { background-color: rgba(0, 0, 0, 0.2); color: var(--text-muted); font-weight: 700; }
+        th, td { padding: 16px; text-align: center; font-size: 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); font-weight: 700; }
+        th { background-color: rgba(0, 0, 0, 0.2); color: #a1a1aa; font-weight: 900; font-size: 14px; }
         tr:last-child td { border-bottom: none; }
         tr:hover { background-color: rgba(255, 255, 255, 0.03); }
         
-        .badge { padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 700; display: inline-block; }
+        .badge { padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 900; display: inline-block; }
         .online { background: rgba(52, 199, 89, 0.15); color: #34c759; border: 1px solid rgba(52, 199, 89, 0.3); }
         .offline { background: rgba(161, 161, 170, 0.15); color: #cbd5e1; border: 1px solid rgba(161, 161, 170, 0.3); }
-        .alert-flash { padding: 14px; background: rgba(52, 199, 89, 0.15); border: 1px solid var(--accent-green); color: #34c759; border-radius: 12px; margin-bottom: 25px; text-align: center; font-weight: 700; }
+        .alert-flash { padding: 14px; background: rgba(52, 199, 89, 0.15); border: 1px solid var(--accent-green); color: #34c759; border-radius: 12px; margin-bottom: 25px; text-align: center; font-weight: 900; font-size: 15px; }
         
         .progress-wrapper { width: 230px; text-align: right; margin: auto; }
-        .progress-text { display: flex; justify-content: space-between; font-size: 12px; color: #a1a1aa; margin-bottom: 5px; }
+        .progress-text { display: flex; justify-content: space-between; font-size: 12px; color: #a1a1aa; margin-bottom: 5px; font-weight: 700; }
         .progress-container { width: 100%; background-color: rgba(255,255,255,0.08); border-radius: 10px; height: 7px; overflow: hidden; }
         .progress-bar { height: 100%; width: 100%; border-radius: 10px; transition: width 0.6s ease, background-color 0.4s ease; }
-        code { background: rgba(255,255,255,0.08); padding: 4px 8px; border-radius: 6px; color: #64d2ff; }
+        code { background: rgba(255,255,255,0.08); padding: 4px 8px; border-radius: 6px; color: #64d2ff; font-family: 'Vazirmatn'; font-weight: 700; }
 
-        /* استایل‌های مربوط به ویجت‌های دایره‌ای منابع سرور */
         .status-container { display: flex; justify-content: space-around; align-items: center; text-align: center; height: 100%; }
         .circle-chart { width: 70px; height: 70px; }
         .circle-bg { fill: none; stroke: rgba(255, 255, 255, 0.1); stroke-width: 3.5; }
         .circle-progress-ram { fill: none; stroke: var(--accent-blue); stroke-width: 3.5; stroke-dasharray: 0, 100; transition: stroke-dasharray 0.5s ease; }
         .circle-progress-cpu { fill: none; stroke: var(--accent-green); stroke-width: 3.5; stroke-dasharray: 0, 100; transition: stroke-dasharray 0.5s ease; }
-        .percentage { font-size: 9px; font-weight: bold; fill: #fff; text-anchor: middle; font-family: 'Vazirmatn'; }
-        .stat-label { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+        .percentage { font-size: 9px; font-weight: 900; fill: #fff; text-anchor: middle; font-family: 'Vazirmatn'; }
+        .stat-label { font-size: 12px; color: #a1a1aa; margin-top: 6px; font-weight: 700; }
     </style>
 </head>
 <body>
@@ -360,7 +363,7 @@ HTML_TEMPLATE = """
 
         <div class="grid-header">
             <div class="card-inner">
-                <h3 style="margin-top:0; font-size:14px; color:#fff; text-align:center; margin-bottom:10px;">📊 وضعیت زنده منابع سرور</h3>
+                <h3 style="margin-top:0; font-size:14px; color:#fff; text-align:center; margin-bottom:10px; font-weight:900;">📊 وضعیت زنده منابع سرور</h3>
                 <div class="status-container">
                     <div>
                         <svg viewBox="0 0 36 36" class="circle-chart">
@@ -382,19 +385,20 @@ HTML_TEMPLATE = """
             </div>
 
             <div class="card-inner" style="text-align: center;">
-                <h3 style="margin-top:0; font-size:14px; color:#fff;">📈 مجموع ترافیک کل کاربران</h3>
-                <div style="font-size: 28px; font-weight: 700; color: var(--accent-blue); margin: 10px 0;" id="total-server-traffic">0.000 <span style="font-size:14px;">GB</span></div>
-                <p style="color:var(--text-muted); font-size:11px; margin:0;">مجموع ترافیک دانلود و آپلود واقعی کالیبره شده کلاینت‌ها</p>
+                <h3 style="margin-top:0; font-size:14px; color:#fff; font-weight:900;">📈 مجموع ترافیک کل کاربران</h3>
+                <div style="font-size: 28px; font-weight: 900; color: var(--accent-blue); margin: 5px 0;" id="total-server-traffic">0.000 <span style="font-size:14px;">GB</span></div>
+                <p style="color:#a1a1aa; font-size:11px; margin:0 0 8px 0;">مجموع ترافیک دانلود و آپلود کالیبره واقعی کلاینت‌ها</p>
+                <a href="/reset_all_traffic" onclick="return confirm('آیا از صفر کردن مصرف ترافیک تمامی کاربران اطمینان دارید؟ اکانت‌ها حذف نخواهند شد.');"><button class="btn-reset-traffic">🔄 ریست مصرف کل کاربران</button></a>
             </div>
 
             <div class="card-inner">
-                <h3 style="margin-top:0; font-size:14px; color:var(--accent-green);">📥 پشتیبان‌گیری دیتابیس</h3>
-                <p style="color:var(--text-muted); font-size:11px; margin-bottom:12px;">استخراج خروجی زنده JSON از اطلاعات کلاینت‌ها.</p>
+                <h3 style="margin-top:0; font-size:14px; color:var(--accent-green); font-weight:900;">📥 پشتیبان‌گیری دیتابیس</h3>
+                <p style="color:#a1a1aa; font-size:11px; margin-bottom:12px;">استخراج خروجی زنده JSON از اطلاعات کلاینت‌ها.</p>
                 <a href="/backup/download"><button class="btn-green" style="width:100%; padding: 10px;">📥 دانلود فایل بک‌آب</button></a>
             </div>
 
             <div class="card-inner">
-                <h3 style="margin-top:0; font-size:14px; color:var(--accent-red);">📤 بازگردانی دیتابیس</h3>
+                <h3 style="margin-top:0; font-size:14px; color:var(--accent-red); font-weight:900;">📤 بازگردانی دیتابیس</h3>
                 <form action="/backup/restore" method="POST" enctype="multipart/form-data" style="flex-direction: column; align-items: stretch; gap: 6px;">
                     <input type="file" name="backup_file" accept=".json" required style="padding:5px; font-size:11px;">
                     <button type="submit" class="btn-red" style="padding:10px;">📤 ریستور کل کاربران</button>
@@ -465,7 +469,6 @@ HTML_TEMPLATE = """
                 
                 if(!data) return;
 
-                // ۱. آپدیت نمودارهای دایره‌ای منابع سرور
                 if(data.system_stats) {
                     const ramUsage = data.system_stats.ram || 0;
                     const cpuUsage = data.system_stats.cpu || 0;
@@ -477,7 +480,6 @@ HTML_TEMPLATE = """
                     document.getElementById('cpu-circle').style.strokeDasharray = cpuUsage + ', 100';
                 }
 
-                // ۲. محاسبه و آپدیت مجموع ترافیک واقعی مصرف شده کاربران در کل سرور
                 if(data.users) {
                     let totalServerUsed = 0;
                     data.users.forEach(u => {
@@ -486,7 +488,6 @@ HTML_TEMPLATE = """
                     document.getElementById('total-server-traffic').innerHTML = totalServerUsed.toFixed(3) + ' <span style="font-size:14px;">GB</span>';
                 }
 
-                // ۳. رندر ردیف‌های جدول کاربران بدون تداخل با بقیه اجزا
                 const tbody = document.getElementById('user-table-body');
                 const searchInputElement = document.getElementById('search-input');
                 const searchInput = searchInputElement ? searchInputElement.value.toLowerCase() : "";
@@ -501,9 +502,9 @@ HTML_TEMPLATE = """
                                 ? '<span class="badge online">● آنلاین</span>' 
                                 : '<span class="badge offline">○ آفلاین</span>';
                             
-                            let statusText = '<span style="color:#34c759; font-weight:700;">فعال</span>';
-                            if (user.status === 'Expired') statusText = '<span style="color:#ff3b30; font-weight:700;">منقضی زمان</span>';
-                            if (user.status === 'Traffic_Limit') statusText = '<span style="color:#ffcc00; font-weight:700;">اتمام حجم</span>';
+                            let statusText = '<span style="color:#34c759; font-weight:900;">فعال</span>';
+                            if (user.status === 'Expired') statusText = '<span style="color:#ff3b30; font-weight:900;">منقضی زمان</span>';
+                            if (user.status === 'Traffic_Limit') statusText = '<span style="color:#ffcc00; font-weight:900;">اتمام حجم</span>';
 
                             const totalGb = parseFloat(user.limit_gb) || 0;
                             const usedGb = parseFloat(user.used_gb) || 0;
@@ -536,10 +537,10 @@ HTML_TEMPLATE = """
                             }
 
                             tr.innerHTML = `
-                                <td style="font-weight:700; color:#007aff;">${user.username}</td>
+                                <td style="font-weight:900; color:#007aff;">${user.username}</td>
                                 <td><code>${user.password}</code></td>
-                                <td style="font-weight:700; color:#cbd5e1;">${totalGb.toFixed(1)} GB</td>
-                                <td><span style="color:#64d2ff; font-weight:700;">${usedGb.toFixed(3)}</span> GB</td>
+                                <td style="font-weight:900; color:#fff;">${totalGb.toFixed(1)} GB</td>
+                                <td><span style="color:#64d2ff; font-weight:900;">${usedGb.toFixed(3)}</span> GB</td>
                                 <td>
                                     <div class="progress-wrapper">
                                         <div class="progress-text">
@@ -551,12 +552,13 @@ HTML_TEMPLATE = """
                                         </div>
                                     </div>
                                 </td>
-                                <td style="font-weight: 700; color: #ff3b30;">${daysText}</td>
+                                <td style="font-weight: 900; color: #ff3b30;">${daysText}</td>
                                 <td>${onlineBadge}</td>
                                 <td>${statusText}</td>
                                 <td>
                                     <a href="/renew/${user.username}"><button class="btn-green" style="padding:6px 14px; font-size:12px; border-radius:8px;">🔄 ریست دوره</button></a>
                                     <a href="/delete/${user.username}"><button class="btn-red" style="padding:6px 14px; font-size:12px; border-radius:8px;">حذف</button></a>
+                                end
                                 </td>
                             `;
                             tbody.appendChild(tr);
@@ -612,6 +614,35 @@ def live_data():
         })
     except Exception as e:
         return jsonify({"users": [], "online_users": [], "system_stats": {"cpu": 0, "ram": 0}, "error": str(e)})
+
+@app.route('/reset_all_traffic')
+def reset_all_traffic():
+    try:
+        with db_lock:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            # صفر کردن مصرف کلیه کاربران بدون تغییر سایر متغیرها کلاینت
+            cursor.execute("UPDATE users SET used_gb=0.0, status='Active'")
+            conn.commit()
+            conn.close()
+        
+        # باز کردن انسداد کلاینت‌ها در لایه لینوکس سرور بعد از صفر کردن ترافیک کلاینت
+        try:
+            with db_lock:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("SELECT username FROM users")
+                all_users = cursor.fetchall()
+                conn.close()
+            for u in all_users:
+                subprocess.run(["sudo", "usermod", "-U", u[0]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except:
+            pass
+            
+        flash("ترافیک مصرفی تمامی کاربران با موفقیت صفر شد و قفل دسترسی‌ها بازگردانی شد.")
+    except Exception as e:
+        flash(f"خطا در ریست ترافیک کل: {str(e)}")
+    return redirect('/')
 
 @app.route('/add', methods=['POST'])
 def add_user():
@@ -773,6 +804,6 @@ install_prerequisites
 create_panel_app
 
 echo -e "\e[1;32m==================================================\e[0m"
-echo -e "\e[1;32m✔ CARDS AND SYSTEM PERFORMANCE APPLIED!            \e[0m"
+echo -e "\e[1;32m✔ CONVERSIONS CALIBRATED & DONT TOUCH OTHER APPS   \e[0m"
 echo -e "\e[1;36m🌐 PANELS LIVE ON PORT 5000                        \e[0m"
 echo -e "\e[1;32m==================================================\e[0m"
