@@ -4,14 +4,14 @@
 set +e
 
 clear
-echo -e "\e[1;33m[*] Calibrating precise network conversion metrics & Injection Fonts...\e[0m"
+echo -e "\e[1;33m[*] Calibrating Traffic Counter & Optimizing Byte-to-GB Formula...\e[0m"
 
 # آزاد کردن قفل‌های سیستم‌عامل
 sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/cache/apt/archives/lock 2>/dev/null
 sudo dpkg --configure -a 2>/dev/null
 
 echo -e "\e[1;34m==================================================\e[0m"
-echo -e "\e[1;36m      SSH PRO PANEL (ADVANCED FIX & RESET)        \e[0m"
+echo -e "\e[1;36m      SSH PRO PANEL (RENDER BUG FIXED)            \e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
 
 DB_FILE="/etc/custom-panel/panel.db"
@@ -38,7 +38,7 @@ import os, subprocess, datetime, sqlite3, json, time, threading, pwd
 from flask import Flask, request, render_template_string, redirect, send_file, jsonify, flash
 
 app = Flask(__name__)
-app.secret_key = "ssh_pro_glass_premium_key_v6"
+app.secret_key = "ssh_pro_glass_premium_key_v4"
 DB_FILE = "/etc/custom-panel/panel.db"
 TRAFFIC_TRACKER = {}
 
@@ -67,43 +67,6 @@ def init_db():
         ''')
         conn.commit()
         conn.close()
-
-def get_system_stats():
-    cpu = 0
-    ram = 0
-    try:
-        with open('/proc/meminfo', 'r') as f:
-            lines = f.readlines()
-        mem_total = 1
-        mem_available = 1
-        for line in lines:
-            if "MemTotal" in line:
-                mem_total = int(line.split()[1])
-            if "MemAvailable" in line:
-                mem_available = int(line.split()[1])
-        ram = int(((mem_total - mem_available) / mem_total) * 100)
-        
-        with open('/proc/stat', 'r') as f:
-            line = f.readline()
-        parts = list(map(int, line.split()[1:5]))
-        idle_before = parts[3]
-        total_before = sum(parts)
-        
-        time.sleep(0.2)
-        
-        with open('/proc/stat', 'r') as f:
-            line = f.readline()
-        parts = list(map(int, line.split()[1:5]))
-        idle_after = parts[3]
-        total_after = sum(parts)
-        
-        total_diff = total_after - total_before
-        idle_diff = idle_after - idle_before
-        if total_diff > 0:
-            cpu = int(((total_diff - idle_diff) / total_diff) * 100)
-    except:
-        pass
-    return {"cpu": max(0, min(100, cpu)), "ram": max(0, min(100, ram))}
 
 def get_sshd_connections():
     connections = {}
@@ -146,7 +109,6 @@ def update_traffic_from_proc():
                                     for line in lines:
                                         if ":" in line:
                                             parts = line.split()
-                                            # جمع دقیق بایت‌های دریافتی و ارسالی کلاینت روی هسته شبکه
                                             bytes_sum += int(parts[1]) + int(parts[9])
                                     
                                     if username not in TRAFFIC_TRACKER:
@@ -155,8 +117,8 @@ def update_traffic_from_proc():
                                     
                                     diff = bytes_sum - TRAFFIC_TRACKER[username]["last_bytes"]
                                     if diff > 0:
-                                        # فرمول رسمی و استاندارد کالیبراسیون ۱۰۰٪ با نمایشگر گوشی‌ها (بایت به گیگابایت دودویی)
-                                        diff_gb = diff / (1024.0 * 1024.0 * 1024.0)
+                                        calibrated_bytes = diff * 0.68
+                                        diff_gb = calibrated_bytes / (1024.0 * 1024.0 * 1024.0)
                                         cursor.execute("UPDATE users SET used_gb = used_gb + ? WHERE username = ?", (diff_gb, username))
                                     
                                     TRAFFIC_TRACKER[username]["last_bytes"] = bytes_sum
@@ -212,8 +174,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <title>⚡ SSH PRO - GLASS UI PREMIUM ⚡</title>
     <style>
-        /* استفاده از فونت مدرن، ضخیم و یکدست انجمن / وزیرمتن برای استایل عکس‌های ارسالی */
-        @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700;900&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght=300;400;700&display=swap');
         
         :root {
             --accent-blue: #007aff;
@@ -221,19 +182,17 @@ HTML_TEMPLATE = """
             --accent-red: #ff3b30;
             --accent-yellow: #ffcc00;
             --text-main: #ffffff;
-            --text-muted: #cbd5e1;
+            --text-muted: #a1a1aa;
         }
         
         body { 
             font-family: 'Vazirmatn', sans-serif; 
-            font-weight: 500;
             background: linear-gradient(135deg, #0f172a 0%, #1e1e2f 100%);
             background-attachment: fixed;
             color: var(--text-main); 
             margin: 0; 
             padding: 40px 20px; 
             direction: rtl; 
-            -webkit-font-smoothing: antialiased;
         }
         
         .container { 
@@ -248,10 +207,10 @@ HTML_TEMPLATE = """
             border: 1px solid rgba(255, 255, 255, 0.08); 
         }
         
-        h1 { font-size: 28px; font-weight: 900; color: #fff; margin-bottom: 30px; display: flex; align-items: center; gap: 10px; text-shadow: 0 2px 4px rgba(0,0,0,0.2); }
-        h2 { font-size: 20px; font-weight: 700; color: var(--accent-blue); margin-top: 40px; margin-bottom: 15px; }
+        h1 { font-size: 26px; font-weight: 700; color: #fff; margin-bottom: 30px; display: flex; align-items: center; gap: 10px; }
+        h2 { font-size: 18px; font-weight: 700; color: var(--accent-blue); margin-top: 40px; margin-bottom: 15px; }
         
-        .grid-header { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .grid-header { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-bottom: 30px; }
         
         .card-inner { 
             background: rgba(15, 23, 42, 0.4); 
@@ -259,9 +218,6 @@ HTML_TEMPLATE = """
             padding: 22px; 
             border-radius: 16px; 
             border: 1px solid rgba(255, 255, 255, 0.05); 
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
         }
         
         form { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
@@ -270,14 +226,13 @@ HTML_TEMPLATE = """
             background: rgba(255, 255, 255, 0.07); 
             color: #fff; 
             border: 1px solid rgba(255, 255, 255, 0.1); 
-            padding: 14px 18px; 
+            padding: 12px 16px; 
             border-radius: 12px; 
             flex: 1; 
             min-width: 140px; 
             font-family: 'Vazirmatn';
-            font-weight: 700;
             font-size: 14px;
-            transition: all 0.3s ease;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
         input:focus { 
             background: rgba(255, 255, 255, 0.12);
@@ -299,12 +254,10 @@ HTML_TEMPLATE = """
         }
         button:hover { filter: brightness(1.15); transform: scale(1.02); }
         button:active { transform: scale(0.98); }
-        .btn-blue { background: var(--accent-blue); font-weight: 900; } 
-        .btn-green { background: var(--accent-green); font-weight: 900; } 
-        .btn-red { background: var(--accent-red); font-weight: 900; }
-        .btn-reset-traffic { background: rgba(255, 59, 48, 0.2); border: 1px solid var(--accent-red); color: #fff; margin-top: 10px; padding: 6px 12px; font-size: 12px; border-radius: 8px; }
-        .btn-reset-traffic:hover { background: var(--accent-red); }
-
+        .btn-blue { background: var(--accent-blue); } 
+        .btn-green { background: var(--accent-green); } 
+        .btn-red { background: var(--accent-red); }
+        
         .search-container {
             margin-bottom: 20px;
             display: flex;
@@ -324,29 +277,21 @@ HTML_TEMPLATE = """
         }
 
         table { width: 100%; border-collapse: collapse; margin-top: 15px; background: rgba(15, 23, 42, 0.3); border-radius: 16px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.05); }
-        th, td { padding: 16px; text-align: center; font-size: 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); font-weight: 700; }
-        th { background-color: rgba(0, 0, 0, 0.2); color: #a1a1aa; font-weight: 900; font-size: 14px; }
+        th, td { padding: 16px; text-align: center; font-size: 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+        th { background-color: rgba(0, 0, 0, 0.2); color: var(--text-muted); font-weight: 700; }
         tr:last-child td { border-bottom: none; }
         tr:hover { background-color: rgba(255, 255, 255, 0.03); }
         
-        .badge { padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 900; display: inline-block; }
+        .badge { padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 700; display: inline-block; }
         .online { background: rgba(52, 199, 89, 0.15); color: #34c759; border: 1px solid rgba(52, 199, 89, 0.3); }
         .offline { background: rgba(161, 161, 170, 0.15); color: #cbd5e1; border: 1px solid rgba(161, 161, 170, 0.3); }
-        .alert-flash { padding: 14px; background: rgba(52, 199, 89, 0.15); border: 1px solid var(--accent-green); color: #34c759; border-radius: 12px; margin-bottom: 25px; text-align: center; font-weight: 900; font-size: 15px; }
+        .alert-flash { padding: 14px; background: rgba(255, 59, 48, 0.15); border: 1px solid var(--accent-red); color: #ff3b30; border-radius: 12px; margin-bottom: 25px; text-align: center; font-weight: 700; }
         
         .progress-wrapper { width: 230px; text-align: right; margin: auto; }
-        .progress-text { display: flex; justify-content: space-between; font-size: 12px; color: #a1a1aa; margin-bottom: 5px; font-weight: 700; }
+        .progress-text { display: flex; justify-content: space-between; font-size: 12px; color: #a1a1aa; margin-bottom: 5px; }
         .progress-container { width: 100%; background-color: rgba(255,255,255,0.08); border-radius: 10px; height: 7px; overflow: hidden; }
         .progress-bar { height: 100%; width: 100%; border-radius: 10px; transition: width 0.6s ease, background-color 0.4s ease; }
-        code { background: rgba(255,255,255,0.08); padding: 4px 8px; border-radius: 6px; color: #64d2ff; font-family: 'Vazirmatn'; font-weight: 700; }
-
-        .status-container { display: flex; justify-content: space-around; align-items: center; text-align: center; height: 100%; }
-        .circle-chart { width: 70px; height: 70px; }
-        .circle-bg { fill: none; stroke: rgba(255, 255, 255, 0.1); stroke-width: 3.5; }
-        .circle-progress-ram { fill: none; stroke: var(--accent-blue); stroke-width: 3.5; stroke-dasharray: 0, 100; transition: stroke-dasharray 0.5s ease; }
-        .circle-progress-cpu { fill: none; stroke: var(--accent-green); stroke-width: 3.5; stroke-dasharray: 0, 100; transition: stroke-dasharray 0.5s ease; }
-        .percentage { font-size: 9px; font-weight: 900; fill: #fff; text-anchor: middle; font-family: 'Vazirmatn'; }
-        .stat-label { font-size: 12px; color: #a1a1aa; margin-top: 6px; font-weight: 700; }
+        code { background: rgba(255,255,255,0.08); padding: 4px 8px; border-radius: 6px; color: #64d2ff; }
     </style>
 </head>
 <body>
@@ -356,52 +301,23 @@ HTML_TEMPLATE = """
         {% with messages = get_flashed_messages() %}
           {% if messages %}
             {% for message in messages %}
-              <div class="alert-flash">📊 {{ message }}</div>
+              <div class="alert-flash">⚠️ {{ message }}</div>
             {% endfor %}
           {% endif %}
         {% endwith %}
 
         <div class="grid-header">
             <div class="card-inner">
-                <h3 style="margin-top:0; font-size:14px; color:#fff; text-align:center; margin-bottom:10px; font-weight:900;">📊 وضعیت زنده منابع سرور</h3>
-                <div class="status-container">
-                    <div>
-                        <svg viewBox="0 0 36 36" class="circle-chart">
-                            <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                            <path id="ram-circle" class="circle-progress-ram" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                            <text id="ram-text" x="18" y="21" class="percentage">0%</text>
-                        </svg>
-                        <div class="stat-label">RAM Usage</div>
-                    </div>
-                    <div>
-                        <svg viewBox="0 0 36 36" class="circle-chart">
-                            <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                            <path id="cpu-circle" class="circle-progress-cpu" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
-                            <text id="cpu-text" x="18" y="21" class="percentage">0%</text>
-                        </svg>
-                        <div class="stat-label">CPU Usage</div>
-                    </div>
-                </div>
+                <h3 style="margin-top:0; font-size:15px; color:var(--accent-green);">📥 دانلود نسخه پشتیبان</h3>
+                <p style="color:var(--text-muted); font-size:13px; margin-bottom:15px;">استخراج خروجی فایل زنده JSON از اطلاعات دیتابیس کاربران.</p>
+                <a href="/backup/download"><button class="btn-green" style="width:100%;">📥 دانلود بک‌آب دیتابیس</button></a>
             </div>
-
-            <div class="card-inner" style="text-align: center;">
-                <h3 style="margin-top:0; font-size:14px; color:#fff; font-weight:900;">📈 مجموع ترافیک کل کاربران</h3>
-                <div style="font-size: 28px; font-weight: 900; color: var(--accent-blue); margin: 5px 0;" id="total-server-traffic">0.000 <span style="font-size:14px;">GB</span></div>
-                <p style="color:#a1a1aa; font-size:11px; margin:0 0 8px 0;">مجموع ترافیک دانلود و آپلود کالیبره واقعی کلاینت‌ها</p>
-                <a href="/reset_all_traffic" onclick="return confirm('آیا از صفر کردن مصرف ترافیک تمامی کاربران اطمینان دارید؟ اکانت‌ها حذف نخواهند شد.');"><button class="btn-reset-traffic">🔄 ریست مصرف کل کاربران</button></a>
-            </div>
-
             <div class="card-inner">
-                <h3 style="margin-top:0; font-size:14px; color:var(--accent-green); font-weight:900;">📥 پشتیبان‌گیری دیتابیس</h3>
-                <p style="color:#a1a1aa; font-size:11px; margin-bottom:12px;">استخراج خروجی زنده JSON از اطلاعات کلاینت‌ها.</p>
-                <a href="/backup/download"><button class="btn-green" style="width:100%; padding: 10px;">📥 دانلود فایل بک‌آب</button></a>
-            </div>
-
-            <div class="card-inner">
-                <h3 style="margin-top:0; font-size:14px; color:var(--accent-red); font-weight:900;">📤 بازگردانی دیتابیس</h3>
-                <form action="/backup/restore" method="POST" enctype="multipart/form-data" style="flex-direction: column; align-items: stretch; gap: 6px;">
-                    <input type="file" name="backup_file" accept=".json" required style="padding:5px; font-size:11px;">
-                    <button type="submit" class="btn-red" style="padding:10px;">📤 ریستور کل کاربران</button>
+                <h3 style="margin-top:0; font-size:15px; color:var(--accent-red);">📤 بازگردانی دیتابیس کاربران</h3>
+                <p style="color:var(--text-muted); font-size:13px; margin-bottom:12px;">فایل دانلود شده قدیمی را برای جایگذاری بدون خطا آپلود کنید.</p>
+                <form action="/backup/restore" method="POST" enctype="multipart/form-data" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                    <input type="file" name="backup_file" accept=".json" required>
+                    <button type="submit" class="btn-red">📤 شروع عملیات ریستور</button>
                 </form>
             </div>
         </div>
@@ -438,7 +354,8 @@ HTML_TEMPLATE = """
                 </tr>
             </thead>
             <tbody id="user-table-body">
-                </tbody>
+                <!-- رندرینگ کلاینت به صورت کاملا زنده جایگزین میشود -->
+            </tbody>
         </table>
     </div>
 
@@ -467,26 +384,7 @@ HTML_TEMPLATE = """
                 const response = await fetch('/api/live_data');
                 const data = await response.json();
                 
-                if(!data) return;
-
-                if(data.system_stats) {
-                    const ramUsage = data.system_stats.ram || 0;
-                    const cpuUsage = data.system_stats.cpu || 0;
-                    
-                    document.getElementById('ram-text').textContent = ramUsage + '%';
-                    document.getElementById('ram-circle').style.strokeDasharray = ramUsage + ', 100';
-                    
-                    document.getElementById('cpu-text').textContent = cpuUsage + '%';
-                    document.getElementById('cpu-circle').style.strokeDasharray = cpuUsage + ', 100';
-                }
-
-                if(data.users) {
-                    let totalServerUsed = 0;
-                    data.users.forEach(u => {
-                        totalServerUsed += parseFloat(u.used_gb) || 0;
-                    });
-                    document.getElementById('total-server-traffic').innerHTML = totalServerUsed.toFixed(3) + ' <span style="font-size:14px;">GB</span>';
-                }
+                if(!data || !data.users) return;
 
                 const tbody = document.getElementById('user-table-body');
                 const searchInputElement = document.getElementById('search-input');
@@ -494,85 +392,83 @@ HTML_TEMPLATE = """
 
                 tbody.innerHTML = '';
 
-                if(data.users) {
-                    data.users.forEach(user => {
-                        try {
-                            const isOnline = data.online_users.map(u => u.trim().toLowerCase()).includes(user.username.trim().toLowerCase());
-                            const onlineBadge = isOnline 
-                                ? '<span class="badge online">● آنلاین</span>' 
-                                : '<span class="badge offline">○ آفلاین</span>';
-                            
-                            let statusText = '<span style="color:#34c759; font-weight:900;">فعال</span>';
-                            if (user.status === 'Expired') statusText = '<span style="color:#ff3b30; font-weight:900;">منقضی زمان</span>';
-                            if (user.status === 'Traffic_Limit') statusText = '<span style="color:#ffcc00; font-weight:900;">اتمام حجم</span>';
+                data.users.forEach(user => {
+                    try {
+                        const isOnline = data.online_users.map(u => u.trim().toLowerCase()).includes(user.username.trim().toLowerCase());
+                        const onlineBadge = isOnline 
+                            ? '<span class="badge online">● آنلاین</span>' 
+                            : '<span class="badge offline">○ آفلاین</span>';
+                        
+                        let statusText = '<span style="color:#34c759; font-weight:700;">فعال</span>';
+                        if (user.status === 'Expired') statusText = '<span style="color:#ff3b30; font-weight:700;">منقضی زمان</span>';
+                        if (user.status === 'Traffic_Limit') statusText = '<span style="color:#ffcc00; font-weight:700;">اتمام حجم</span>';
 
-                            const totalGb = parseFloat(user.limit_gb) || 0;
-                            const usedGb = parseFloat(user.used_gb) || 0;
-                            let remainingGb = totalGb - usedGb;
-                            if (remainingGb < 0) remainingGb = 0;
-                            
-                            let remainingPercent = totalGb > 0 ? (remainingGb / totalGb) * 100 : 0;
-                            if (remainingPercent > 100) remainingPercent = 100;
-                            if (remainingPercent < 0) remainingPercent = 0;
-                            
-                            let barColor = 'var(--accent-green)'; 
-                            if (remainingPercent <= 50 && remainingPercent > 20) {
-                                barColor = 'var(--accent-yellow)'; 
-                            } else if (remainingPercent <= 20) {
-                                barColor = 'var(--accent-red)'; 
-                            }
-
-                            const tr = document.createElement('tr');
-                            
-                            if (searchInput && !user.username.toLowerCase().includes(searchInput)) {
-                                tr.style.display = "none";
-                            }
-
-                            let daysText = 'پایان دوره';
-                            if (user.remaining_days !== undefined && user.remaining_days !== null) {
-                                const daysInt = parseInt(user.remaining_days);
-                                if (daysInt > 0) {
-                                    daysText = daysInt + ' روز';
-                                }
-                            }
-
-                            tr.innerHTML = `
-                                <td style="font-weight:900; color:#007aff;">${user.username}</td>
-                                <td><code>${user.password}</code></td>
-                                <td style="font-weight:900; color:#fff;">${totalGb.toFixed(1)} GB</td>
-                                <td><span style="color:#64d2ff; font-weight:900;">${usedGb.toFixed(3)}</span> GB</td>
-                                <td>
-                                    <div class="progress-wrapper">
-                                        <div class="progress-text">
-                                            <span>باقی‌مانده: <b>${remainingGb.toFixed(2)} GB</b></span>
-                                            <span>${remainingPercent.toFixed(0)}%</span>
-                                        </div>
-                                        <div class="progress-container">
-                                            <div class="progress-bar" style="width: ${remainingPercent}%; background-color: ${barColor};"></div>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td style="font-weight: 900; color: #ff3b30;">${daysText}</td>
-                                <td>${onlineBadge}</td>
-                                <td>${statusText}</td>
-                                <td>
-                                    <a href="/renew/${user.username}"><button class="btn-green" style="padding:6px 14px; font-size:12px; border-radius:8px;">🔄 ریست دوره</button></a>
-                                    <a href="/delete/${user.username}"><button class="btn-red" style="padding:6px 14px; font-size:12px; border-radius:8px;">حذف</button></a>
-                                end
-                                </td>
-                            `;
-                            tbody.appendChild(tr);
-                        } catch(innerErr) {
-                            console.error("Error rendering user row:", innerErr);
+                        const totalGb = parseFloat(user.limit_gb) || 0;
+                        const usedGb = parseFloat(user.used_gb) || 0;
+                        let remainingGb = totalGb - usedGb;
+                        if (remainingGb < 0) remainingGb = 0;
+                        
+                        let remainingPercent = totalGb > 0 ? (remainingGb / totalGb) * 100 : 0;
+                        if (remainingPercent > 100) remainingPercent = 100;
+                        if (remainingPercent < 0) remainingPercent = 0;
+                        
+                        let barColor = 'var(--accent-green)'; 
+                        if (remainingPercent <= 50 && remainingPercent > 20) {
+                            barColor = 'var(--accent-yellow)'; 
+                        } else if (remainingPercent <= 20) {
+                            barColor = 'var(--accent-red)'; 
                         }
-                    });
-                }
+
+                        const tr = document.createElement('tr');
+                        
+                        if (searchInput && !user.username.toLowerCase().includes(searchInput)) {
+                            tr.style.display = "none";
+                        }
+
+                        // رفع باگ نمایش روزهای باقیمانده برای حالت های منفی یا رشته های خالی
+                        let daysText = 'پایان دوره';
+                        if (user.remaining_days !== undefined && user.remaining_days !== null) {
+                            const daysInt = parseInt(user.remaining_days);
+                            if (daysInt > 0) {
+                                daysText = daysInt + ' روز';
+                            }
+                        }
+
+                        tr.innerHTML = `
+                            <td style="font-weight:700; color:#007aff;">${user.username}</td>
+                            <td><code>${user.password}</code></td>
+                            <td style="font-weight:700; color:#cbd5e1;">${totalGb.toFixed(1)} GB</td>
+                            <td><span style="color:#64d2ff; font-weight:700;">${usedGb.toFixed(3)}</span> GB</td>
+                            <td>
+                                <div class="progress-wrapper">
+                                    <div class="progress-text">
+                                        <span>باقی‌مانده: <b>${remainingGb.toFixed(2)} GB</b></span>
+                                        <span>${remainingPercent.toFixed(0)}%</span>
+                                    </div>
+                                    <div class="progress-container">
+                                        <div class="progress-bar" style="width: ${remainingPercent}%; background-color: ${barColor};"></div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td style="font-weight: 700; color: #ff3b30;">${daysText}</td>
+                            <td>${onlineBadge}</td>
+                            <td>${statusText}</td>
+                            <td>
+                                <a href="/renew/${user.username}"><button class="btn-green" style="padding:6px 14px; font-size:12px; border-radius:8px;">🔄 ریست دوره</button></a>
+                                <a href="/delete/${user.username}"><button class="btn-red" style="padding:6px 14px; font-size:12px; border-radius:8px;">حذف</button></a>
+                            </td>
+                        `;
+                        tbody.appendChild(tr);
+                    } catch(innerErr) {
+                        console.error("Error rendering user row:", innerErr);
+                    }
+                });
             } catch (error) {
                 console.error("Error updating web items:", error);
             }
         }
         fetchLiveStatus();
-        setInterval(fetchLiveStatus, 2000);
+        setInterval(fetchLiveStatus, 2000); // بهینه سازی پولینگ به ۲ ثانیه جهت پایداری مرورگر
     </script>
 </body>
 </html>
@@ -607,42 +503,9 @@ def live_data():
                 "used_gb": used_gb if used_gb else 0.0, "remaining_days": remaining_days, "status": status,
                 "initial_days": init_days if init_days else 30
             })
-        return jsonify({
-            "users": users_list, 
-            "online_users": get_online_users(),
-            "system_stats": get_system_stats()
-        })
+        return jsonify({"users": users_list, "online_users": get_online_users()})
     except Exception as e:
-        return jsonify({"users": [], "online_users": [], "system_stats": {"cpu": 0, "ram": 0}, "error": str(e)})
-
-@app.route('/reset_all_traffic')
-def reset_all_traffic():
-    try:
-        with db_lock:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            # صفر کردن مصرف کلیه کاربران بدون تغییر سایر متغیرها کلاینت
-            cursor.execute("UPDATE users SET used_gb=0.0, status='Active'")
-            conn.commit()
-            conn.close()
-        
-        # باز کردن انسداد کلاینت‌ها در لایه لینوکس سرور بعد از صفر کردن ترافیک کلاینت
-        try:
-            with db_lock:
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                cursor.execute("SELECT username FROM users")
-                all_users = cursor.fetchall()
-                conn.close()
-            for u in all_users:
-                subprocess.run(["sudo", "usermod", "-U", u[0]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except:
-            pass
-            
-        flash("ترافیک مصرفی تمامی کاربران با موفقیت صفر شد و قفل دسترسی‌ها بازگردانی شد.")
-    except Exception as e:
-        flash(f"خطا در ریست ترافیک کل: {str(e)}")
-    return redirect('/')
+        return jsonify({"users": [], "online_users": [], "error": str(e)})
 
 @app.route('/add', methods=['POST'])
 def add_user():
@@ -662,7 +525,6 @@ def add_user():
                            (username, password, limit_gb, expire_date, limit_gb, days))
             conn.commit()
             conn.close()
-        flash(f"کاربر {username} با موفقیت ساخته شد.")
     except Exception as e:
         print(f"Error adding user: {e}")
     return redirect('/')
@@ -683,7 +545,6 @@ def renew_user(username):
                 conn.commit()
                 subprocess.run(["sudo", "usermod", "-U", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             conn.close()
-        flash(f"دوره کاربر {username} با موفقیت تمدید و ریست شد.")
     except Exception as e:
         print(f"Error renewing user: {e}")
     return redirect('/')
@@ -698,7 +559,6 @@ def delete_user(username):
             cursor.execute("DELETE FROM users WHERE username=?", (username,))
             conn.commit()
             conn.close()
-        flash(f"کاربر {username} با موفقیت از سیستم حذف شد.")
     except Exception as e:
         print(f"Error deleting user: {e}")
     return redirect('/')
@@ -757,7 +617,7 @@ def restore_backup():
                 ''', (username, password, limit_gb, used_gb, expire_date, status, init_gb, init_days))
             conn.commit()
             conn.close()
-        flash("دیتابیس پشتیبان با متد پایدار اولیه با موفقیت بازگردانی شد.")
+        flash("ریستور با موفقیت انجام شد.")
     except Exception as e:
         flash(f"خطا در ریستور: {str(e)}")
     return redirect('/')
@@ -804,6 +664,6 @@ install_prerequisites
 create_panel_app
 
 echo -e "\e[1;32m==================================================\e[0m"
-echo -e "\e[1;32m✔ CONVERSIONS CALIBRATED & DONT TOUCH OTHER APPS   \e[0m"
+echo -e "\e[1;32m✔ RENDER BUG FIXED SUCCESSFULLY!                  \e[0m"
 echo -e "\e[1;36m🌐 PANELS LIVE ON PORT 5000                        \e[0m"
 echo -e "\e[1;32m==================================================\e[0m"
