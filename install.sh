@@ -4,14 +4,14 @@
 set +e
 
 clear
-echo -e "\e[1;33m[*] Calibrating precise network conversion metrics & Injection Fonts...\e[0m"
+echo -e "\e[1;33m[*] Fixing Restore render engine & Independent Server Traffic Reset...\e[0m"
 
 # آزاد کردن قفل‌های سیستم‌عامل
 sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/cache/apt/archives/lock 2>/dev/null
 sudo dpkg --configure -a 2>/dev/null
 
 echo -e "\e[1;34m==================================================\e[0m"
-echo -e "\e[1;36m      SSH PRO PANEL (ADVANCED FIX & RESET)        \e[0m"
+echo -e "\e[1;36m         SSH PRO PANEL (FINAL STABLE VERSION)     \e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
 
 DB_FILE="/etc/custom-panel/panel.db"
@@ -32,13 +32,13 @@ install_prerequisites() {
 }
 
 create_panel_app() {
-    echo "[*] Injecting Updated iOS Glassmorphism Web Panel..."
+    echo "[*] Injecting Fixed iOS Glassmorphism Web Panel..."
     sudo tee /etc/custom-panel/app.py > /dev/null << 'EOF'
 import os, subprocess, datetime, sqlite3, json, time, threading, pwd
 from flask import Flask, request, render_template_string, redirect, send_file, jsonify, flash
 
 app = Flask(__name__)
-app.secret_key = "ssh_pro_glass_premium_key_v6"
+app.secret_key = "ssh_pro_glass_premium_key_v7"
 DB_FILE = "/etc/custom-panel/panel.db"
 TRAFFIC_TRACKER = {}
 
@@ -65,8 +65,30 @@ def init_db():
                 initial_days INTEGER
             )
         ''')
+        # ایجاد جدول تنظیمات برای ذخیره آفست ترافیک کل سرور
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        ''')
+        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('server_traffic_offset', '0.0')")
         conn.commit()
         conn.close()
+
+def get_server_offset():
+    try:
+        with db_lock:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM settings WHERE key='server_traffic_offset'")
+            row = cursor.fetchone()
+            conn.close()
+            if row:
+                return float(row[0])
+    except:
+        pass
+    return 0.0
 
 def get_system_stats():
     cpu = 0
@@ -146,7 +168,6 @@ def update_traffic_from_proc():
                                     for line in lines:
                                         if ":" in line:
                                             parts = line.split()
-                                            # جمع دقیق بایت‌های دریافتی و ارسالی کلاینت روی هسته شبکه
                                             bytes_sum += int(parts[1]) + int(parts[9])
                                     
                                     if username not in TRAFFIC_TRACKER:
@@ -155,7 +176,6 @@ def update_traffic_from_proc():
                                     
                                     diff = bytes_sum - TRAFFIC_TRACKER[username]["last_bytes"]
                                     if diff > 0:
-                                        # فرمول رسمی و استاندارد کالیبراسیون ۱۰۰٪ با نمایشگر گوشی‌ها (بایت به گیگابایت دودویی)
                                         diff_gb = diff / (1024.0 * 1024.0 * 1024.0)
                                         cursor.execute("UPDATE users SET used_gb = used_gb + ? WHERE username = ?", (diff_gb, username))
                                     
@@ -212,7 +232,6 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <title>⚡ SSH PRO - GLASS UI PREMIUM ⚡</title>
     <style>
-        /* استفاده از فونت مدرن، ضخیم و یکدست انجمن / وزیرمتن برای استایل عکس‌های ارسالی */
         @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;700;900&display=swap');
         
         :root {
@@ -302,7 +321,7 @@ HTML_TEMPLATE = """
         .btn-blue { background: var(--accent-blue); font-weight: 900; } 
         .btn-green { background: var(--accent-green); font-weight: 900; } 
         .btn-red { background: var(--accent-red); font-weight: 900; }
-        .btn-reset-traffic { background: rgba(255, 59, 48, 0.2); border: 1px solid var(--accent-red); color: #fff; margin-top: 10px; padding: 6px 12px; font-size: 12px; border-radius: 8px; }
+        .btn-reset-traffic { background: rgba(255, 59, 48, 0.2); border: 1px solid var(--accent-red); color: #fff; margin-top: 10px; padding: 6px 12px; font-size: 12px; border-radius: 8px; cursor: pointer; }
         .btn-reset-traffic:hover { background: var(--accent-red); }
 
         .search-container {
@@ -388,7 +407,7 @@ HTML_TEMPLATE = """
                 <h3 style="margin-top:0; font-size:14px; color:#fff; font-weight:900;">📈 مجموع ترافیک کل کاربران</h3>
                 <div style="font-size: 28px; font-weight: 900; color: var(--accent-blue); margin: 5px 0;" id="total-server-traffic">0.000 <span style="font-size:14px;">GB</span></div>
                 <p style="color:#a1a1aa; font-size:11px; margin:0 0 8px 0;">مجموع ترافیک دانلود و آپلود کالیبره واقعی کلاینت‌ها</p>
-                <a href="/reset_all_traffic" onclick="return confirm('آیا از صفر کردن مصرف ترافیک تمامی کاربران اطمینان دارید؟ اکانت‌ها حذف نخواهند شد.');"><button class="btn-reset-traffic">🔄 ریست مصرف کل کاربران</button></a>
+                <a href="/reset_counter_only" onclick="return confirm('آیا از صفر کردن فقط همین شمارنده بالایی اطمینان دارید؟ حجم مصرفی کاربران هیچ تغییری نخواهد کرد.');"><button class="btn-reset-traffic">🔄 ریست شمارنده ترافیک کل</button></a>
             </div>
 
             <div class="card-inner">
@@ -485,7 +504,11 @@ HTML_TEMPLATE = """
                     data.users.forEach(u => {
                         totalServerUsed += parseFloat(u.used_gb) || 0;
                     });
-                    document.getElementById('total-server-traffic').innerHTML = totalServerUsed.toFixed(3) + ' <span style="font-size:14px;">GB</span>';
+                    // اعمال آفست ذخیره شده مستقل
+                    let finalCounterValue = totalServerUsed - (parseFloat(data.offset) || 0);
+                    if (finalCounterValue < 0) finalCounterValue = 0;
+                    
+                    document.getElementById('total-server-traffic').innerHTML = finalCounterValue.toFixed(3) + ' <span style="font-size:14px;">GB</span>';
                 }
 
                 const tbody = document.getElementById('user-table-body');
@@ -537,28 +560,27 @@ HTML_TEMPLATE = """
                             }
 
                             tr.innerHTML = `
-                                <td style="font-weight:900; color:#007aff;">${user.username}</td>
-                                <td><code>${user.password}</code></td>
-                                <td style="font-weight:900; color:#fff;">${totalGb.toFixed(1)} GB</td>
-                                <td><span style="color:#64d2ff; font-weight:900;">${usedGb.toFixed(3)}</span> GB</td>
+                                <td style="font-weight:900; color:#007aff;">\${user.username}</td>
+                                <td><code>\${user.password}</code></td>
+                                <td style="font-weight:900; color:#fff;">\${totalGb.toFixed(1)} GB</td>
+                                <td><span style="color:#64d2ff; font-weight:900;">\${usedGb.toFixed(3)}</span> GB</td>
                                 <td>
                                     <div class="progress-wrapper">
                                         <div class="progress-text">
-                                            <span>باقی‌مانده: <b>${remainingGb.toFixed(2)} GB</b></span>
-                                            <span>${remainingPercent.toFixed(0)}%</span>
+                                            <span>باقی‌مانده: <b>\${remainingGb.toFixed(2)} GB</b></span>
+                                            <span>\${remainingPercent.toFixed(0)}%</span>
                                         </div>
                                         <div class="progress-container">
-                                            <div class="progress-bar" style="width: ${remainingPercent}%; background-color: ${barColor};"></div>
+                                            <div class="progress-bar" style="width: \${remainingPercent}%; background-color: \${barColor};"></div>
                                         </div>
                                     </div>
                                 </td>
-                                <td style="font-weight: 900; color: #ff3b30;">${daysText}</td>
-                                <td>${onlineBadge}</td>
-                                <td>${statusText}</td>
+                                <td style="font-weight: 900; color: #ff3b30;">\${daysText}</td>
+                                <td>\${onlineBadge}</td>
+                                <td>\${statusText}</td>
                                 <td>
-                                    <a href="/renew/${user.username}"><button class="btn-green" style="padding:6px 14px; font-size:12px; border-radius:8px;">🔄 ریست دوره</button></a>
-                                    <a href="/delete/${user.username}"><button class="btn-red" style="padding:6px 14px; font-size:12px; border-radius:8px;">حذف</button></a>
-                                end
+                                    <a href="/renew/\${user.username}"><button class="btn-green" style="padding:6px 14px; font-size:12px; border-radius:8px;">🔄 ریست دوره</button></a>
+                                    <a href="/delete/\${user.username}"><button class="btn-red" style="padding:6px 14px; font-size:12px; border-radius:8px;">حذف</button></a>
                                 </td>
                             `;
                             tbody.appendChild(tr);
@@ -610,38 +632,29 @@ def live_data():
         return jsonify({
             "users": users_list, 
             "online_users": get_online_users(),
-            "system_stats": get_system_stats()
+            "system_stats": get_system_stats(),
+            "offset": get_server_offset()
         })
     except Exception as e:
-        return jsonify({"users": [], "online_users": [], "system_stats": {"cpu": 0, "ram": 0}, "error": str(e)})
+        return jsonify({"users": [], "online_users": [], "system_stats": {"cpu": 0, "ram": 0}, "offset": 0.0, "error": str(e)})
 
-@app.route('/reset_all_traffic')
-def reset_all_traffic():
+@app.route('/reset_counter_only')
+def reset_counter_only():
     try:
         with db_lock:
             conn = get_db_connection()
             cursor = conn.cursor()
-            # صفر کردن مصرف کلیه کاربران بدون تغییر سایر متغیرها کلاینت
-            cursor.execute("UPDATE users SET used_gb=0.0, status='Active'")
+            cursor.execute("SELECT SUM(used_gb) FROM users")
+            total_used = cursor.fetchone()[0]
+            if not total_used: total_used = 0.0
+            
+            # ذخیره کردن مقدار ترافیک جاری به عنوان آفست منفی (فقط شمارنده صفر می‌شود، نه کاربران)
+            cursor.execute("UPDATE settings SET value=? WHERE key='server_traffic_offset'", (str(total_used),))
             conn.commit()
             conn.close()
-        
-        # باز کردن انسداد کلاینت‌ها در لایه لینوکس سرور بعد از صفر کردن ترافیک کلاینت
-        try:
-            with db_lock:
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                cursor.execute("SELECT username FROM users")
-                all_users = cursor.fetchall()
-                conn.close()
-            for u in all_users:
-                subprocess.run(["sudo", "usermod", "-U", u[0]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except:
-            pass
-            
-        flash("ترافیک مصرفی تمامی کاربران با موفقیت صفر شد و قفل دسترسی‌ها بازگردانی شد.")
+        flash("شمارنده کل ترافیک سرور با موفقیت صفر شد. (حجم مصرفی کاربران دست‌نخورده باقی ماند)")
     except Exception as e:
-        flash(f"خطا در ریست ترافیک کل: {str(e)}")
+        flash(f"خطا در ریست شمارنده: {str(e)}")
     return redirect('/')
 
 @app.route('/add', methods=['POST'])
@@ -804,6 +817,6 @@ install_prerequisites
 create_panel_app
 
 echo -e "\e[1;32m==================================================\e[0m"
-echo -e "\e[1;32m✔ CONVERSIONS CALIBRATED & DONT TOUCH OTHER APPS   \e[0m"
-echo -e "\e[1;36m🌐 PANELS LIVE ON PORT 5000                        \e[0m"
+echo -e "\e[1;32m✔ RESTORE ENGINE BUG FIXED!                        \e[0m"
+echo -e "\e[1;36m🌐 INDEPENDENT TOTAL RESET UPDATED ON PORT 5000    \e[0m"
 echo -e "\e[1;32m==================================================\e[0m"
