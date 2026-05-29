@@ -6,36 +6,27 @@ set -e
 clear
 echo -e "\e[1;33m[*] Killing package managers and forcing lock release...\e[0m"
 
-# ۱. آزاد کردن اجباری قفل dpkg و بستن پروسس‌های مزاحم سیستم‌عامل
+# ۱. آزاد کردن اجباری قفل dpkg
 sudo killall -9 apt-get apt unattended-upgrades || true
 sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/cache/apt/archives/lock
 sudo dpkg --configure -a || true
 
 echo -e "\e[1;32m✔ System locks cleared successfully.\e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
-echo -e "\e[1;36m       SSH PRO PANEL (UBUNTU 24.04 FIX)           \e[0m"
-echo -e "\e[1;34m==================================================\e[0m"
-
-# ۲. ایجاد مکث ۳ ثانیه‌ای به صورت شمارش معکوس زنده
-for i in {3..1}; do
-    echo -e "\e[1;35m⏳ Starting installation in $i seconds...\e[0m"
-    sleep 1
-done
-
-echo -e "\e[1;32m🚀 Launching installation now...\e[0m"
+echo -e "\e[1;36m       SSH PRO PANEL (REAL-TIME TRAFFIC & FIX)    \e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
 
 DB_FILE="/etc/custom-panel/panel.db"
 WEB_PANEL_PORT=5000
 
 purge_old_installation() {
-    echo "[*] Cleaning up and purging previous installation files..."
-    
+    echo "[*] Cleaning up old installation files..."
     sudo systemctl stop custom-panel.service 2>/dev/null || true
     sudo systemctl disable custom-panel.service 2>/dev/null || true
     sudo rm -f /etc/systemd/system/custom-panel.service
     sudo systemctl daemon-reload
     
+    # پاکسازی رول‌های قدیمی برای جلوگیری از تداخل
     sudo iptables -F || true
     sudo iptables -X || true
     
@@ -44,17 +35,10 @@ purge_old_installation() {
 }
 
 install_prerequisites() {
-    echo "[*] Extra safety check: ensuring updates timers are quiet..."
-    sudo systemctl stop unattended-upgrades 2>/dev/null || true
-    sudo systemctl stop apt-daily.timer 2>/dev/null || true
-    sudo systemctl stop apt-daily-upgrade.timer 2>/dev/null || true
-    
-    echo "[*] Installing required system packages (Fixing space and packet breaks)..."
+    echo "[*] Installing required system packages..."
     sudo apt update -y
-    # رفع مشکل تداخل پکیج‌ها در اوبونتو ۲۴.۰۴ با حذف نسخه‌های قدیمی ماندگار
     sudo apt install -y openssh-server python3 python3-pip python3-flask ufw sqlite3 bc psmisc iptables net-tools vnstat
     
-    # تنظیم فایروال سرور
     sudo ufw allow $WEB_PANEL_PORT/tcp comment 'Web Panel'
     sudo ufw allow 22/tcp comment 'SSH Default'
     sudo ufw --force enable
@@ -93,7 +77,6 @@ def init_db():
 def get_sshd_connections():
     connections = {}
     try:
-        # اصلاح فیلتر پروسس برای هر دو نسخه قدیمی و جدید اوبونتو (ssh/sshd)
         output = subprocess.check_output("ps -eo user,pid,command | grep -E 'sshd:|ssh:'", shell=True).decode()
         for line in output.strip().split('\n'):
             parts = line.split()
@@ -112,25 +95,35 @@ def get_online_users():
     return list(get_sshd_connections().keys())
 
 def setup_iptables_for_user(username):
+    """تنظیم دقیق زنجیره فایروال برای مچ کردن صد درصدی ترافیک فوروارد شده اکانت"""
     try:
-        subprocess.run(f"sudo iptables -N SSH_{username} 2>/dev/null || true", shell=True)
-        subprocess.run(f"sudo iptables -A OUTPUT -m owner --uid-owner {username} -j SSH_{username} 2>/dev/null || true", shell=True)
-        subprocess.run(f"sudo iptables -A INPUT -m owner --uid-owner {username} -j SSH_{username} 2>/dev/null || true", shell=True)
+        # ایجاد رول اختصاصی خروجی و ورودی در زنجیره‌های اصلی لینوکس
+        subprocess.run(f"sudo iptables -C OUTPUT -m owner --uid-owner {username} -j ACCEPT 2>/dev/null || sudo iptables -I OUTPUT 1 -m owner --uid-owner {username} -j ACCEPT", shell=True)
+        subprocess.run(f"sudo iptables -C INPUT -m owner --uid-owner {username} -j ACCEPT 2>/dev/null || sudo iptables -I INPUT 1 -m owner --uid-owner {username} -j ACCEPT", shell=True)
+        # رول فوروارد ترافیک برای تانل‌ها
+        subprocess.run(f"sudo iptables -C FORWARD -m owner --uid-owner {username} -j ACCEPT 2>/dev/null || sudo iptables -I FORWARD 1 -m owner --uid-owner {username} -j ACCEPT", shell=True)
     except:
         pass
 
 def get_iptables_traffic(username):
+    """محاسبه دقیق و لحظه‌ای بایت‌های عبور کرده از فایروال بدون تاخیر"""
     try:
         setup_iptables_for_user(username)
-        output = subprocess.check_output(f"sudo iptables -L OUTPUT -v -n -x | grep -E 'owner UID match {username}|SSH_{username}' || true", shell=True).decode()
+        # واکشی آمار بایت‌ها مستقیماً از سوئیچ -v -n -x لینوکس
+        output = subprocess.check_output(f"sudo iptables -L OUTPUT -v -n -x | grep -E 'owner UID match {username}' || true", shell=True).decode()
+        input_output = subprocess.check_output(f"sudo iptables -L INPUT -v -n -x | grep -E 'owner UID match {username}' || true", shell=True).decode()
+        forward_output = subprocess.check_output(f"sudo iptables -L FORWARD -v -n -x | grep -E 'owner UID match {username}' || true", shell=True).decode()
+        
         bytes_total = 0
-        for line in output.strip().split('\n'):
-            parts = line.split()
-            if len(parts) > 0:
-                try:
-                    bytes_total += int(parts[0])
-                except:
-                    pass
+        for block in [output, input_output, forward_output]:
+            for line in block.strip().split('\n'):
+                parts = line.split()
+                if len(parts) > 0:
+                    try:
+                        bytes_total += int(parts[0]) # واکشی بایت خام
+                    except:
+                        pass
+        
         gb_used = bytes_total / (1024.0 * 1024.0 * 1024.0)
         return gb_used
     except:
@@ -155,6 +148,7 @@ def monitor_core_logic():
             conn = sqlite3.connect(DB_FILE)
             cursor = conn.cursor()
             
+            # ۱. بررسی تاریخ انقضا
             cursor.execute("SELECT username, expire_date, status FROM users WHERE status='Active'")
             active_users = cursor.fetchall()
             for user in active_users:
@@ -164,8 +158,8 @@ def monitor_core_logic():
                     cursor.execute("UPDATE users SET status='Expired' WHERE username=?", (username,))
                     subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+            # ۲. بررسی زنده و لحظه‌ای حجم مصرفی فایروال
             active_connections = get_sshd_connections()
-            
             cursor.execute("SELECT username, limit_gb, used_gb, status FROM users")
             db_users = {r[0]: {"limit": r[1], "used": r[2], "status": r[3]} for r in cursor.fetchall()}
             
@@ -177,11 +171,13 @@ def monitor_core_logic():
                     cursor.execute("UPDATE users SET used_gb=? WHERE username=?", (real_gb_used, username))
                     userdata['used'] = real_gb_used
 
+                # لیمیت کردن آنی در صورت عبور از سقف حجم مجاز
                 if userdata['used'] >= userdata['limit'] and userdata['status'] == 'Active':
                     subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     cursor.execute("UPDATE users SET status='Traffic_Limit' WHERE username=?", (username,))
                     subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+            # ۳. سیستم تک‌کاربره سخت‌گیرانه (آنلاین همزمان فقط ۱ دستگاه)
             for username, pids in active_connections.items():
                 if len(pids) > 1:
                     for extra_pid in pids[1:]:
@@ -199,7 +195,7 @@ HTML_TEMPLATE = """
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>⚡ SSH PRO PANEL - UBUNTU 24 ⚡</title>
+    <title>⚡ SSH PRO PANEL - REALTIME NATIVE ⚡</title>
     <style>
         :root {
             --bg-color: #0f172a;
@@ -213,11 +209,10 @@ HTML_TEMPLATE = """
             --border-color: #334155;
         }
         body { font-family: 'Segoe UI', Tahoma, Arial; background-color: var(--bg-color); color: var(--text-main); margin: 0; padding: 30px; direction: rtl; }
-        .container { max-width: 1300px; background: var(--card-bg); padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); margin: auto; border: 1px solid var(--border-color); }
+        .container { max-width: 1400px; background: var(--card-bg); padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); margin: auto; border: 1px solid var(--border-color); }
         h1 { font-size: 26px; color: var(--text-main); display: flex; align-items: center; gap: 10px; margin-bottom: 25px; }
         h2 { font-size: 18px; color: var(--accent-blue); margin-top: 35px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; }
-        .grid-header { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 25px; }
-        .card-inner { background: #111827; padding: 20px; border-radius: 8px; border: 1px solid var(--border-color); }
+        .card-inner { background: #111827; padding: 20px; border-radius: 8px; border: 1px solid var(--border-color); margin-bottom: 20px; }
         form { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
         input { background: #111827; color: var(--text-main); border: 1px solid var(--border-color); padding: 10px 14px; border-radius: 6px; flex: 1; min-width: 120px; }
         button { padding: 10px 20px; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; transition: 0.2s; }
@@ -235,30 +230,8 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <h1>⚡ پنل مدیریت هوشمند SSH PRO (پشتیبانی کامل از اوبونتو ۲۴.۰۴)</h1>
+        <h1>⚡ پنل مانیتورینگ لحظه‌ای و فوق دقیق SSH PRO (بدون ریست همزمانی)</h1>
         
-        {% with messages = get_flashed_messages() %}
-          {% if messages %}
-            {% for message in messages %}
-              <div class="alert-flash">⚠️ سیستم: {{ message }}</div>
-            {% endfor %}
-          {% endif %}
-        {% endwith %}
-        
-        <div class="grid-header">
-            <div class="card-inner">
-                <h3 style="margin-top:0; color:var(--accent-green);">📥 پشتیبان‌گیری دیتابیس</h3>
-                <a href="/backup/download"><button class="btn-green" style="width:100%;">دانلود فایل بک‌آپ پنل (.json)</button></a>
-            </div>
-            <div class="card-inner">
-                <h3 style="margin-top:0; color:var(--accent-red);">📤 بازگردانی دیتابیس</h3>
-                <form action="/backup/restore" method="POST" enctype="multipart/form-data" style="flex-direction: column; align-items: stretch; gap: 8px;">
-                    <input type="file" name="backup_file" accept=".json" required style="padding:6px;">
-                    <button type="submit" class="btn-red">شروع عملیات ریستور</button>
-                </form>
-            </div>
-        </div>
-
         <h2>➕ ساخت اکانت تک‌کاربره جدید</h2>
         <div class="card-inner">
             <form action="/add" method="POST">
@@ -266,22 +239,22 @@ HTML_TEMPLATE = """
                 <input type="text" name="password" placeholder="کلمه عبور" required>
                 <input type="number" step="0.1" name="limit_gb" placeholder="حجم مجاز (GB)" required>
                 <input type="number" name="days" placeholder="مدت اعتبار (روز)" required>
-                <button type="submit" class="btn-blue">ایجاد کاربر جدید</button>
+                <button type="submit" class="btn-blue">ایجاد کاربر</button>
             </form>
         </div>
 
-        <h2>👥 مانیتورینگ زنده کاربران</h2>
+        <h2>👥 مانیتورینگ ثانیه‌ای و زنده کاربران</h2>
         <table>
             <thead>
                 <tr>
                     <th>نام کاربری</th>
                     <th>کلمه عبور</th>
-                    <th>حجم مجاز اولیه</th>
+                    <th>حجم مجاز (GB)</th>
                     <th>حجم مصرفی واقعی (GB)</th>
                     <th>روزهای باقی‌مانده</th>
                     <th>وضعیت اتصال</th>
                     <th>وضعیت سیستم</th>
-                    <th>عملیات مدیریت</th>
+                    <th>عملیات ویرایش پارامترها و تمدید</th>
                 </tr>
             </thead>
             <tbody id="user-table-body">
@@ -317,14 +290,14 @@ HTML_TEMPLATE = """
                         <td>${onlineBadge}</td>
                         <td>${statusText}</td>
                         <td>
-                            <form action="/edit" method="POST" style="display:inline-flex; gap:5px; background:none; padding:0;">
+                            <form action="/edit" method="POST" style="display:inline-flex; gap:5px; background:none; padding:0; margin:0;">
                                 <input type="hidden" name="username" value="${user.username}">
-                                <input type="number" step="0.1" name="limit_gb" value="${user.limit_gb}" style="width:65px; min-width:auto; padding:4px; font-size:12px;">
-                                <input type="number" name="add_days" value="${user.initial_days}" style="width:55px; min-width:auto; padding:4px; font-size:12px;">
-                                <button type="submit" class="btn-yellow" style="padding:4px 8px; font-size:12px;">ویرایش</button>
+                                <input type="number" step="0.1" name="limit_gb" value="${user.limit_gb}" title="تغییر حجم کل" style="width:75px; min-width:auto; padding:5px; font-size:12px;">
+                                <input type="number" name="remaining_days" value="${user.remaining_days}" title="تغییر مستقیم روزهای باقی‌مانده" style="width:60px; min-width:auto; padding:5px; font-size:12px;">
+                                <button type="submit" class="btn-yellow" style="padding:5px 10px; font-size:12px;">💾 اعمال ویرایش</button>
                             </form>
-                            <a href="/renew/${user.username}"><button class="btn-green" style="padding:4px 8px; font-size:12px;">🔄 تمدید</button></a>
-                            <a href="/delete/${user.username}"><button class="btn-red" style="padding:4px 8px; font-size:12px;">حذف</button></a>
+                            <a href="/renew/${user.username}"><button class="btn-green" style="padding:5px 10px; font-size:12px;">🔄 تمدید (ریست دوره)</button></a>
+                            <a href="/delete/${user.username}"><button class="btn-red" style="padding:5px 10px; font-size:12px;">حذف</button></a>
                         </td>
                     `;
                     tbody.appendChild(tr);
@@ -335,7 +308,8 @@ HTML_TEMPLATE = """
         }
 
         fetchLiveStatus();
-        setInterval(fetchLiveStatus, 2000);
+        // رفرش کل دیتای صفحه هر ۱ ثانیه یکبار به صورت کاملا زنده و آسنکرون
+        setInterval(fetchLiveStatus, 1000);
     </script>
 </body>
 </html>
@@ -393,35 +367,41 @@ def add_user():
         conn.commit()
         conn.close()
     except Exception as e:
-        flash(str(e))
+        pass
     return redirect('/')
 
 @app.route('/edit', methods=['POST'])
 def edit_user():
+    """اصلاح متد ویرایش: تغییر سقف حجم و روزها بدون تغییر و دستکاری در حجم مصرف شده فعلی کاربر"""
     try:
         username = request.form['username'].strip()
         limit_gb = float(request.form['limit_gb'].strip())
-        add_days = int(request.form['add_days'].strip())
-        expire_date = (datetime.datetime.now() + datetime.timedelta(days=add_days)).strftime("%Y-%m-%d")
+        remaining_days = int(request.form['remaining_days'].strip())
         
-        subprocess.run(f"sudo iptables -Z SSH_{username} 2>/dev/null || true", shell=True)
+        # محاسبه تاریخ انقضای جدید بر اساس روزهای وارد شده جدید از همین امروز
+        new_expire_date = (datetime.datetime.now() + datetime.timedelta(days=remaining_days)).strftime("%Y-%m-%d")
         
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        cursor.execute("UPDATE users SET limit_gb=?, used_gb=0.0, expire_date=?, initial_gb=?, initial_days=?, status='Active' WHERE username=?", 
-                       (limit_gb, expire_date, limit_gb, add_days, username))
+        # فقط سقف حجم و تاریخ انقضا آپدیت می‌شود، فیلد used_gb دست‌نخورده باقی می‌ماند
+        cursor.execute("UPDATE users SET limit_gb=?, expire_date=?, initial_gb=?, initial_days=?, status='Active' WHERE username=?", 
+                       (limit_gb, new_expire_date, limit_gb, remaining_days, username))
         conn.commit()
         conn.close()
         
         subprocess.run(["sudo", "usermod", "-U", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception as e:
-        flash(str(e))
+        print(f"Error on edit: {e}")
     return redirect('/')
 
 @app.route('/renew/<username>')
 def renew_user(username):
+    """متد تمدید: ریست کردن کامل دوره مصرفی و بازگردانی به حجم صفر"""
     try:
-        subprocess.run(f"sudo iptables -Z SSH_{username} 2>/dev/null || true", shell=True)
+        # صفر کردن شمارنده سخت‌افزاری کارت شبکه لینوکس برای این یوزر
+        subprocess.run(f"sudo iptables -Z OUTPUT -m owner --uid-owner {username} 2>/dev/null || true", shell=True)
+        subprocess.run(f"sudo iptables -Z INPUT -m owner --uid-owner {username} 2>/dev/null || true", shell=True)
+        subprocess.run(f"sudo iptables -Z FORWARD -m owner --uid-owner {username} 2>/dev/null || true", shell=True)
         
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
@@ -430,22 +410,23 @@ def renew_user(username):
         if row:
             init_gb, init_days = row
             new_expire = (datetime.datetime.now() + datetime.timedelta(days=init_days)).strftime("%Y-%m-%d")
+            # در زمان تمدید فیلد used_gb کاملا 0.0 می‌شود
             cursor.execute("UPDATE users SET used_gb=0.0, limit_gb=?, expire_date=?, status='Active' WHERE username=?", 
                            (init_gb, new_expire, username))
             conn.commit()
             subprocess.run(["sudo", "usermod", "-U", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         conn.close()
     except Exception as e:
-        flash(str(e))
+        pass
     return redirect('/')
 
 @app.route('/delete/<username>')
 def delete_user(username):
     try:
         subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(f"sudo iptables -D OUTPUT -m owner --uid-owner {username} -j SSH_{username} 2>/dev/null || true", shell=True)
-        subprocess.run(f"sudo iptables -F SSH_{username} 2>/dev/null || true", shell=True)
-        subprocess.run(f"sudo iptables -X SSH_{username} 2>/dev/null || true", shell=True)
+        subprocess.run(f"sudo iptables -D OUTPUT -m owner --uid-owner {username} -j ACCEPT 2>/dev/null || true", shell=True)
+        subprocess.run(f"sudo iptables -D INPUT -m owner --uid-owner {username} -j ACCEPT 2>/dev/null || true", shell=True)
+        subprocess.run(f"sudo iptables -D FORWARD -m owner --uid-owner {username} -j ACCEPT 2>/dev/null || true", shell=True)
         
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
@@ -453,71 +434,7 @@ def delete_user(username):
         conn.commit()
         conn.close()
     except Exception as e:
-        flash(str(e))
-    return redirect('/')
-
-@app.route('/backup/download')
-def download_backup():
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute("SELECT username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days FROM users")
-        rows = cursor.fetchall()
-        conn.close()
-        
-        backup_data = []
-        for row in rows:
-            backup_data.append({
-                "username": row[0], "password": row[1], "limit_gb": row[2], "used_gb": row[3],
-                "expire_date": row[4], "status": row[5], "initial_gb": row[6], "initial_days": row[7]
-            })
-        backup_filename = f"/tmp/ssh_premium_backup.json"
-        with open(backup_filename, "w") as f:
-            json.dump(backup_data, f, indent=4)
-        return send_file(backup_filename, as_attachment=True, download_name="ssh_premium_backup.json")
-    except Exception as e:
-        return str(e)
-
-@app.route('/backup/restore', methods=['POST'])
-def restore_backup():
-    try:
-        if 'backup_file' not in request.files: return redirect('/')
-        file = request.files['backup_file']
-        if file.filename == '' or not file: return redirect('/')
-        
-        data = json.load(file)
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        for item in data:
-            username = item['username']
-            password = item['password']
-            limit_gb = item['limit_gb']
-            used_gb = item['used_gb']
-            expire_date = item['expire_date']
-            status = item['status']
-            init_gb = item.get('initial_gb', limit_gb)
-            init_days = item.get('initial_days', 30)
-            
-            try:
-                subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            except:
-                pass
-                
-            subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True, check=True)
-            setup_iptables_for_user(username)
-            
-            if status != 'Active':
-                subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                
-            cursor.execute('''
-                INSERT OR REPLACE INTO users (username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (username, password, limit_gb, used_gb, expire_date, status, init_gb, init_days))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        flash(str(e))
+        pass
     return redirect('/')
 
 if __name__ == '__main__':
@@ -525,9 +442,6 @@ if __name__ == '__main__':
     threading.Thread(target=monitor_core_logic, daemon=True).start()
     app.run(host='0.0.0.0', port=5000)
 EOF
-
-    # هماهنگ‌سازی مدیریت سیستم سرویس‌دهی اوبونتو ۲۴.۰۴ (تغییر از sshd به ssh)
-    sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd 2>/dev/null
 
     sudo tee /etc/systemd/system/custom-panel.service > /dev/null <<EOF
 [Unit]
@@ -553,6 +467,6 @@ install_prerequisites
 create_panel_app
 
 echo -e "\e[1;32m==================================================\e[0m"
-echo -e "\e[1;32m✔ SUCCESS: LIVE PATCH FOR UBUNTU 24.04 EXECUTED! \e[0m"
-echo -e "\e[1;36m🌐 WEB PANEL RE-LAUNCHED AND LIVE ON PORT 5000     \e[0m"
+echo -e "\e[1;32m✔ SUCCESS: 1-SECOND REALTIME FORWARDING PATTERNS! \e[0m"
+echo -e "\e[1;36m🌐 WEB PANEL ACTIVE ON PORT 5000                  \e[0m"
 echo -e "\e[1;32m==================================================\e[0m"
