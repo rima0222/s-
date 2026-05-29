@@ -4,14 +4,14 @@
 set +e
 
 clear
-echo -e "\e[1;33m[*] Calibrating Traffic Counter & Optimizing Byte-to-GB Formula...\e[0m"
+echo -e "\e[1;33m[*] Optimizing Traffic Counter to match Mobile Devices perfectly...\e[0m"
 
 # آزاد کردن قفل‌های سیستم‌عامل
 sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/cache/apt/archives/lock 2>/dev/null
 sudo dpkg --configure -a 2>/dev/null
 
 echo -e "\e[1;34m==================================================\e[0m"
-echo -e "\e[1;36m      SSH PRO PANEL (CALIBRATED ACCURATE TRAFFIC)   \e[0m"
+echo -e "\e[1;36m      SSH PRO PANEL (TRAFFIC & CARDS FIXED)       \e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
 
 DB_FILE="/etc/custom-panel/panel.db"
@@ -38,16 +38,15 @@ import os, subprocess, datetime, sqlite3, json, time, threading, pwd
 from flask import Flask, request, render_template_string, redirect, send_file, jsonify, flash
 
 app = Flask(__name__)
-app.secret_key = "ssh_pro_glass_premium_key_v4"
+app.secret_key = "ssh_pro_glass_premium_key_v5"
 DB_FILE = "/etc/custom-panel/panel.db"
 TRAFFIC_TRACKER = {}
 
-# تعریف یک Lock برای جلوگیری از تداخل ریسمان‌ها در دیتابیس
 db_lock = threading.Lock()
 
 def get_db_connection():
     conn = sqlite3.connect(DB_FILE, timeout=30.0, check_same_thread=False)
-    conn.execute('PRAGMA journal_mode=WAL;')  # افزایش سرعت و پایداری نوشتن همزمان
+    conn.execute('PRAGMA journal_mode=WAL;')
     return conn
 
 def init_db():
@@ -69,6 +68,46 @@ def init_db():
         conn.commit()
         conn.close()
 
+def get_system_stats():
+    """محاسبه واقعی میزان مصرف سی‌پی‌یو و رم سرور"""
+    cpu = 0
+    ram = 0
+    try:
+        # محاسبه مصرف رم
+        with open('/proc/meminfo', 'r') as f:
+            lines = f.readlines()
+        mem_total = 1
+        mem_available = 1
+        for line in lines:
+            if "MemTotal" in line:
+                mem_total = int(line.split()[1])
+            if "MemAvailable" in line:
+                mem_available = int(line.split()[1])
+        ram = int(((mem_total - mem_available) / mem_total) * 100)
+        
+        # محاسبه مصرف سی‌پی‌یو
+        with open('/proc/stat', 'r') as f:
+            line = f.readline()
+        parts = list(map(int, line.split()[1:5]))
+        idle_before = parts[3]
+        total_before = sum(parts)
+        
+        time.sleep(0.2)
+        
+        with open('/proc/stat', 'r') as f:
+            line = f.readline()
+        parts = list(map(int, line.split()[1:5]))
+        idle_after = parts[3]
+        total_after = sum(parts)
+        
+        total_diff = total_after - total_before
+        idle_diff = idle_after - idle_before
+        if total_diff > 0:
+            cpu = int(((total_diff - idle_diff) / total_diff) * 100)
+    except:
+        pass
+    return {"cpu": max(0, min(100, cpu)), "ram": max(0, min(100, ram))}
+
 def get_sshd_connections():
     connections = {}
     try:
@@ -76,8 +115,8 @@ def get_sshd_connections():
         for line in output.strip().split('\n'):
             parts = line.split()
             if len(parts) >= 3:
-                user = parts[0]
-                pid = parts[1]
+                user = parts[0].strip()
+                pid = parts[1].strip()
                 if user not in ['root', 'sshd', 'nobody', 'ssh'] and 'net' not in user:
                     if user not in connections:
                         connections[user] = []
@@ -118,8 +157,8 @@ def update_traffic_from_proc():
                                     
                                     diff = bytes_sum - TRAFFIC_TRACKER[username]["last_bytes"]
                                     if diff > 0:
-                                        calibrated_bytes = diff * 0.68
-                                        diff_gb = calibrated_bytes / (1024.0 * 1024.0 * 1024.0)
+                                        # حذف ضریب کالیبراسیون برای تطابق ۱۰۰ درصدی با مصرف اینترنت گوشی کاربر
+                                        diff_gb = diff / (1024.0 * 1024.0 * 1024.0)
                                         cursor.execute("UPDATE users SET used_gb = used_gb + ? WHERE username = ?", (diff_gb, username))
                                     
                                     TRAFFIC_TRACKER[username]["last_bytes"] = bytes_sum
@@ -139,7 +178,6 @@ def monitor_core_logic():
                 conn = get_db_connection()
                 cursor = conn.cursor()
                 
-                # ۱. بررسی تاریخ انقضا
                 cursor.execute("SELECT username, expire_date, status FROM users WHERE status='Active'")
                 active_users = cursor.fetchall()
                 for user in active_users:
@@ -149,7 +187,6 @@ def monitor_core_logic():
                         cursor.execute("UPDATE users SET status='Expired' WHERE username=?", (username,))
                         subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-                # ۲. بررسی اتمام حجم
                 cursor.execute("SELECT username, limit_gb, used_gb, status FROM users")
                 for row in cursor.fetchall():
                     username, limit_gb, used_gb, status = row
@@ -158,7 +195,6 @@ def monitor_core_logic():
                         cursor.execute("UPDATE users SET status='Traffic_Limit' WHERE username=?", (username,))
                         subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-                # ۳. جلوگیری از مولتی لوگین
                 active_connections = get_sshd_connections()
                 for username, pids in active_connections.items():
                     if len(pids) > 1:
@@ -214,7 +250,7 @@ HTML_TEMPLATE = """
         h1 { font-size: 26px; font-weight: 700; color: #fff; margin-bottom: 30px; display: flex; align-items: center; gap: 10px; }
         h2 { font-size: 18px; font-weight: 700; color: var(--accent-blue); margin-top: 40px; margin-bottom: 15px; }
         
-        .grid-header { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .grid-header { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 30px; }
         
         .card-inner { 
             background: rgba(15, 23, 42, 0.4); 
@@ -222,6 +258,9 @@ HTML_TEMPLATE = """
             padding: 22px; 
             border-radius: 16px; 
             border: 1px solid rgba(255, 255, 255, 0.05); 
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
         }
         
         form { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
@@ -280,7 +319,7 @@ HTML_TEMPLATE = """
             box-shadow: none;
         }
 
-        table { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 15px; background: rgba(15, 23, 42, 0.3); border-radius: 16px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.05); }
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; background: rgba(15, 23, 42, 0.3); border-radius: 16px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.05); }
         th, td { padding: 16px; text-align: center; font-size: 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
         th { background-color: rgba(0, 0, 0, 0.2); color: var(--text-muted); font-weight: 700; }
         tr:last-child td { border-bottom: none; }
@@ -289,13 +328,22 @@ HTML_TEMPLATE = """
         .badge { padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 700; display: inline-block; }
         .online { background: rgba(52, 199, 89, 0.15); color: #34c759; border: 1px solid rgba(52, 199, 89, 0.3); }
         .offline { background: rgba(161, 161, 170, 0.15); color: #cbd5e1; border: 1px solid rgba(161, 161, 170, 0.3); }
-        .alert-flash { padding: 14px; background: rgba(255, 59, 48, 0.15); border: 1px solid var(--accent-red); color: #ff3b30; border-radius: 12px; margin-bottom: 25px; text-align: center; font-weight: 700; }
+        .alert-flash { padding: 14px; background: rgba(52, 199, 89, 0.15); border: 1px solid var(--accent-green); color: #34c759; border-radius: 12px; margin-bottom: 25px; text-align: center; font-weight: 700; }
         
         .progress-wrapper { width: 230px; text-align: right; margin: auto; }
         .progress-text { display: flex; justify-content: space-between; font-size: 12px; color: #a1a1aa; margin-bottom: 5px; }
         .progress-container { width: 100%; background-color: rgba(255,255,255,0.08); border-radius: 10px; height: 7px; overflow: hidden; }
         .progress-bar { height: 100%; width: 100%; border-radius: 10px; transition: width 0.6s ease, background-color 0.4s ease; }
         code { background: rgba(255,255,255,0.08); padding: 4px 8px; border-radius: 6px; color: #64d2ff; }
+
+        /* استایل‌های مربوط به ویجت‌های دایره‌ای منابع سرور */
+        .status-container { display: flex; justify-content: space-around; align-items: center; text-align: center; height: 100%; }
+        .circle-chart { width: 70px; height: 70px; }
+        .circle-bg { fill: none; stroke: rgba(255, 255, 255, 0.1); stroke-width: 3.5; }
+        .circle-progress-ram { fill: none; stroke: var(--accent-blue); stroke-width: 3.5; stroke-dasharray: 0, 100; transition: stroke-dasharray 0.5s ease; }
+        .circle-progress-cpu { fill: none; stroke: var(--accent-green); stroke-width: 3.5; stroke-dasharray: 0, 100; transition: stroke-dasharray 0.5s ease; }
+        .percentage { font-size: 9px; font-weight: bold; fill: #fff; text-anchor: middle; font-family: 'Vazirmatn'; }
+        .stat-label { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
     </style>
 </head>
 <body>
@@ -305,23 +353,51 @@ HTML_TEMPLATE = """
         {% with messages = get_flashed_messages() %}
           {% if messages %}
             {% for message in messages %}
-              <div class="alert-flash">⚠️ {{ message }}</div>
+              <div class="alert-flash">📊 {{ message }}</div>
             {% endfor %}
           {% endif %}
         {% endwith %}
 
         <div class="grid-header">
             <div class="card-inner">
-                <h3 style="margin-top:0; font-size:15px; color:var(--accent-green);">📥 دانلود نسخه پشتیبان</h3>
-                <p style="color:var(--text-muted); font-size:13px; margin-bottom:15px;">استخراج خروجی فایل زنده JSON از اطلاعات دیتابیس کاربران.</p>
-                <a href="/backup/download"><button class="btn-green" style="width:100%;">📥 دانلود بک‌آب دیتابیس</button></a>
+                <h3 style="margin-top:0; font-size:14px; color:#fff; text-align:center; margin-bottom:10px;">📊 وضعیت زنده منابع سرور</h3>
+                <div class="status-container">
+                    <div>
+                        <svg viewBox="0 0 36 36" class="circle-chart">
+                            <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                            <path id="ram-circle" class="circle-progress-ram" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                            <text id="ram-text" x="18" y="21" class="percentage">0%</text>
+                        </svg>
+                        <div class="stat-label">RAM Usage</div>
+                    </div>
+                    <div>
+                        <svg viewBox="0 0 36 36" class="circle-chart">
+                            <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                            <path id="cpu-circle" class="circle-progress-cpu" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                            <text id="cpu-text" x="18" y="21" class="percentage">0%</text>
+                        </svg>
+                        <div class="stat-label">CPU Usage</div>
+                    </div>
+                </div>
             </div>
+
+            <div class="card-inner" style="text-align: center;">
+                <h3 style="margin-top:0; font-size:14px; color:#fff;">📈 مجموع ترافیک کل کاربران</h3>
+                <div style="font-size: 28px; font-weight: 700; color: var(--accent-blue); margin: 10px 0;" id="total-server-traffic">0.000 <span style="font-size:14px;">GB</span></div>
+                <p style="color:var(--text-muted); font-size:11px; margin:0;">مجموع ترافیک دانلود و آپلود واقعی کالیبره شده کلاینت‌ها</p>
+            </div>
+
             <div class="card-inner">
-                <h3 style="margin-top:0; font-size:15px; color:var(--accent-red);">📤 بازگردانی دیتابیس کاربران</h3>
-                <p style="color:var(--text-muted); font-size:13px; margin-bottom:12px;">فایل دانلود شده قدیمی را برای جایگذاری بدون خطا آپلود کنید.</p>
-                <form action="/backup/restore" method="POST" enctype="multipart/form-data" style="flex-direction: column; align-items: stretch; gap: 8px;">
-                    <input type="file" name="backup_file" accept=".json" required>
-                    <button type="submit" class="btn-red">📤 شروع عملیات ریستور</button>
+                <h3 style="margin-top:0; font-size:14px; color:var(--accent-green);">📥 پشتیبان‌گیری دیتابیس</h3>
+                <p style="color:var(--text-muted); font-size:11px; margin-bottom:12px;">استخراج خروجی زنده JSON از اطلاعات کلاینت‌ها.</p>
+                <a href="/backup/download"><button class="btn-green" style="width:100%; padding: 10px;">📥 دانلود فایل بک‌آب</button></a>
+            </div>
+
+            <div class="card-inner">
+                <h3 style="margin-top:0; font-size:14px; color:var(--accent-red);">📤 بازگردانی دیتابیس</h3>
+                <form action="/backup/restore" method="POST" enctype="multipart/form-data" style="flex-direction: column; align-items: stretch; gap: 6px;">
+                    <input type="file" name="backup_file" accept=".json" required style="padding:5px; font-size:11px;">
+                    <button type="submit" class="btn-red" style="padding:10px;">📤 ریستور کل کاربران</button>
                 </form>
             </div>
         </div>
@@ -386,73 +462,115 @@ HTML_TEMPLATE = """
             try {
                 const response = await fetch('/api/live_data');
                 const data = await response.json();
+                
+                if(!data) return;
+
+                // ۱. آپدیت نمودارهای دایره‌ای منابع سرور
+                if(data.system_stats) {
+                    const ramUsage = data.system_stats.ram || 0;
+                    const cpuUsage = data.system_stats.cpu || 0;
+                    
+                    document.getElementById('ram-text').textContent = ramUsage + '%';
+                    document.getElementById('ram-circle').style.strokeDasharray = ramUsage + ', 100';
+                    
+                    document.getElementById('cpu-text').textContent = cpuUsage + '%';
+                    document.getElementById('cpu-circle').style.strokeDasharray = cpuUsage + ', 100';
+                }
+
+                // ۲. محاسبه و آپدیت مجموع ترافیک واقعی مصرف شده کاربران در کل سرور
+                if(data.users) {
+                    let totalServerUsed = 0;
+                    data.users.forEach(u => {
+                        totalServerUsed += parseFloat(u.used_gb) || 0;
+                    });
+                    document.getElementById('total-server-traffic').innerHTML = totalServerUsed.toFixed(3) + ' <span style="font-size:14px;">GB</span>';
+                }
+
+                // ۳. رندر ردیف‌های جدول کاربران بدون تداخل با بقیه اجزا
                 const tbody = document.getElementById('user-table-body');
-                const searchInput = document.getElementById('search-input').value.toLowerCase();
+                const searchInputElement = document.getElementById('search-input');
+                const searchInput = searchInputElement ? searchInputElement.value.toLowerCase() : "";
 
                 tbody.innerHTML = '';
 
-                data.users.forEach(user => {
-                    const isOnline = data.online_users.includes(user.username);
-                    const onlineBadge = isOnline 
-                        ? '<span class="badge online">● آنلاین</span>' 
-                        : '<span class="badge offline">○ آفلاین</span>';
-                    
-                    let statusText = '<span style="color:#34c759; font-weight:700;">فعال</span>';
-                    if (user.status === 'Expired') statusText = '<span style="color:#ff3b30; font-weight:700;">منقضی زمان</span>';
-                    if (user.status === 'Traffic_Limit') statusText = '<span style="color:#ffcc00; font-weight:700;">اتمام حجم</span>';
+                if(data.users) {
+                    data.users.forEach(user => {
+                        try {
+                            const isOnline = data.online_users.map(u => u.trim().toLowerCase()).includes(user.username.trim().toLowerCase());
+                            const onlineBadge = isOnline 
+                                ? '<span class="badge online">● آنلاین</span>' 
+                                : '<span class="badge offline">○ آفلاین</span>';
+                            
+                            let statusText = '<span style="color:#34c759; font-weight:700;">فعال</span>';
+                            if (user.status === 'Expired') statusText = '<span style="color:#ff3b30; font-weight:700;">منقضی زمان</span>';
+                            if (user.status === 'Traffic_Limit') statusText = '<span style="color:#ffcc00; font-weight:700;">اتمام حجم</span>';
 
-                    const totalGb = user.limit_gb;
-                    const usedGb = user.used_gb;
-                    let remainingGb = totalGb - usedGb;
-                    if (remainingGb < 0) remainingGb = 0;
-                    
-                    let remainingPercent = totalGb > 0 ? (remainingGb / totalGb) * 100 : 0;
-                    
-                    let barColor = 'var(--accent-green)'; 
-                    if (remainingPercent <= 50 && remainingPercent > 20) {
-                        barColor = 'var(--accent-yellow)'; 
-                    } else if (remainingPercent <= 20) {
-                        barColor = 'var(--accent-red)'; 
-                    }
+                            const totalGb = parseFloat(user.limit_gb) || 0;
+                            const usedGb = parseFloat(user.used_gb) || 0;
+                            let remainingGb = totalGb - usedGb;
+                            if (remainingGb < 0) remainingGb = 0;
+                            
+                            let remainingPercent = totalGb > 0 ? (remainingGb / totalGb) * 100 : 0;
+                            if (remainingPercent > 100) remainingPercent = 100;
+                            if (remainingPercent < 0) remainingPercent = 0;
+                            
+                            let barColor = 'var(--accent-green)'; 
+                            if (remainingPercent <= 50 && remainingPercent > 20) {
+                                barColor = 'var(--accent-yellow)'; 
+                            } else if (remainingPercent <= 20) {
+                                barColor = 'var(--accent-red)'; 
+                            }
 
-                    const tr = document.createElement('tr');
-                    
-                    if (searchInput && !user.username.toLowerCase().includes(searchInput)) {
-                        tr.style.display = "none";
-                    }
+                            const tr = document.createElement('tr');
+                            
+                            if (searchInput && !user.username.toLowerCase().includes(searchInput)) {
+                                tr.style.display = "none";
+                            }
 
-                    tr.innerHTML = `
-                        <td style="font-weight:700; color:#007aff;">${user.username}</td>
-                        <td><code>${user.password}</code></td>
-                        <td style="font-weight:700; color:#cbd5e1;">${totalGb} GB</td>
-                        <td><span style="color:#64d2ff; font-weight:700;">${usedGb.toFixed(3)}</span> GB</td>
-                        <td>
-                            <div class="progress-wrapper">
-                                <div class="progress-text">
-                                    <span>باقی‌مانده: <b>${remainingGb.toFixed(2)} GB</b></span>
-                                    <span>${remainingPercent.toFixed(0)}%</span>
-                                </div>
-                                <div class="progress-container">
-                                    <div class="progress-bar" style="width: ${remainingPercent}%; background-color: ${barColor};"></div>
-                                </div>
-                            </div>
-                        </td>
-                        <td style="font-weight: 700; color: #ff3b30;">${user.remaining_days >= 0 ? user.remaining_days + ' روز' : 'پایان دوره'}</td>
-                        <td>${onlineBadge}</td>
-                        <td>${statusText}</td>
-                        <td>
-                            <a href="/renew/${user.username}"><button class="btn-green" style="padding:6px 14px; font-size:12px; border-radius:8px;">🔄 ریست دوره</button></a>
-                            <a href="/delete/${user.username}"><button class="btn-red" style="padding:6px 14px; font-size:12px; border-radius:8px;">حذف</button></a>
-                        </td>
-                    `;
-                    tbody.appendChild(tr);
-                });
+                            let daysText = 'پایان دوره';
+                            if (user.remaining_days !== undefined && user.remaining_days !== null) {
+                                const daysInt = parseInt(user.remaining_days);
+                                if (daysInt > 0) {
+                                    daysText = daysInt + ' روز';
+                                }
+                            }
+
+                            tr.innerHTML = `
+                                <td style="font-weight:700; color:#007aff;">${user.username}</td>
+                                <td><code>${user.password}</code></td>
+                                <td style="font-weight:700; color:#cbd5e1;">${totalGb.toFixed(1)} GB</td>
+                                <td><span style="color:#64d2ff; font-weight:700;">${usedGb.toFixed(3)}</span> GB</td>
+                                <td>
+                                    <div class="progress-wrapper">
+                                        <div class="progress-text">
+                                            <span>باقی‌مانده: <b>${remainingGb.toFixed(2)} GB</b></span>
+                                            <span>${remainingPercent.toFixed(0)}%</span>
+                                        </div>
+                                        <div class="progress-container">
+                                            <div class="progress-bar" style="width: ${remainingPercent}%; background-color: ${barColor};"></div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td style="font-weight: 700; color: #ff3b30;">${daysText}</td>
+                                <td>${onlineBadge}</td>
+                                <td>${statusText}</td>
+                                <td>
+                                    <a href="/renew/${user.username}"><button class="btn-green" style="padding:6px 14px; font-size:12px; border-radius:8px;">🔄 ریست دوره</button></a>
+                                    <a href="/delete/${user.username}"><button class="btn-red" style="padding:6px 14px; font-size:12px; border-radius:8px;">حذف</button></a>
+                                </td>
+                            `;
+                            tbody.appendChild(tr);
+                        } catch(innerErr) {
+                            console.error("Error rendering user row:", innerErr);
+                        }
+                    });
+                }
             } catch (error) {
                 console.error("Error updating web items:", error);
             }
         }
         fetchLiveStatus();
-        setInterval(fetchLiveStatus, 1000);
+        setInterval(fetchLiveStatus, 2000);
     </script>
 </body>
 </html>
@@ -487,9 +605,13 @@ def live_data():
                 "used_gb": used_gb if used_gb else 0.0, "remaining_days": remaining_days, "status": status,
                 "initial_days": init_days if init_days else 30
             })
-        return jsonify({"users": users_list, "online_users": get_online_users()})
+        return jsonify({
+            "users": users_list, 
+            "online_users": get_online_users(),
+            "system_stats": get_system_stats()
+        })
     except Exception as e:
-        return jsonify({"users": [], "online_users": [], "error": str(e)})
+        return jsonify({"users": [], "online_users": [], "system_stats": {"cpu": 0, "ram": 0}, "error": str(e)})
 
 @app.route('/add', methods=['POST'])
 def add_user():
@@ -500,7 +622,6 @@ def add_user():
         days = int(request.form['days'].strip())
         expire_date = (datetime.datetime.now() + datetime.timedelta(days=days)).strftime("%Y-%m-%d")
         
-        # ایجاد امن کاربر در سیستم عامل
         safe_system_user_create(username, password)
         
         with db_lock:
@@ -510,6 +631,7 @@ def add_user():
                            (username, password, limit_gb, expire_date, limit_gb, days))
             conn.commit()
             conn.close()
+        flash(f"کاربر {username} با موفقیت ساخته شد.")
     except Exception as e:
         print(f"Error adding user: {e}")
     return redirect('/')
@@ -530,6 +652,7 @@ def renew_user(username):
                 conn.commit()
                 subprocess.run(["sudo", "usermod", "-U", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             conn.close()
+        flash(f"دوره کاربر {username} با موفقیت تمدید و ریست شد.")
     except Exception as e:
         print(f"Error renewing user: {e}")
     return redirect('/')
@@ -544,6 +667,7 @@ def delete_user(username):
             cursor.execute("DELETE FROM users WHERE username=?", (username,))
             conn.commit()
             conn.close()
+        flash(f"کاربر {username} با موفقیت از سیستم حذف شد.")
     except Exception as e:
         print(f"Error deleting user: {e}")
     return redirect('/')
@@ -602,19 +726,16 @@ def restore_backup():
                 ''', (username, password, limit_gb, used_gb, expire_date, status, init_gb, init_days))
             conn.commit()
             conn.close()
-        flash("ریستور با موفقیت انجام شد.")
+        flash("دیتابیس پشتیبان با متد پایدار اولیه با موفقیت بازگردانی شد.")
     except Exception as e:
         flash(f"خطا در ریستور: {str(e)}")
     return redirect('/')
 
 def safe_system_user_create(username, password):
-    # چک کردن وجود یوزر با ماژول رسمی pwd به جای متن پاسورد جهت جلوگیری از تداخل اسم‌ها
     try:
         pwd.getpwnam(username)
-        # اگر یوزر وجود داشت، آن را به طور امن حذف میکنیم تا مجدد ساخته شود
         subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except KeyError:
-        # یوزر وجود ندارد و آماده ساخت است
         pass
         
     subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -652,6 +773,6 @@ install_prerequisites
 create_panel_app
 
 echo -e "\e[1;32m==================================================\e[0m"
-echo -e "\e[1;32m✔ TRAFFIC CALIBRATED SUCCESSFULLY!                \e[0m"
-echo -e "\e[1;36m🌐 READY AND STABLE ON PORT 5000                   \e[0m"
+echo -e "\e[1;32m✔ CARDS AND SYSTEM PERFORMANCE APPLIED!            \e[0m"
+echo -e "\e[1;36m🌐 PANELS LIVE ON PORT 5000                        \e[0m"
 echo -e "\e[1;32m==================================================\e[0m"
