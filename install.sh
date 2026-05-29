@@ -5,7 +5,7 @@ set -e
 
 clear
 echo -e "\e[1;34m==================================================\e[0m"
-echo -e "\e[1;36m    SSH PRO ADVANCED PANEL (DARK THEME & RECOVERY) \e[0m"
+echo -e "\e[1;36m    SSH PRO ADVANCED PANEL (SMART RENEW & DARK)   \e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
 echo "Please select an option:"
 echo "1) Fresh Install (نصب اولیه یا راه اندازی مجدد)"
@@ -17,47 +17,36 @@ DB_FILE="/etc/custom-panel/panel.db"
 WEB_PANEL_PORT=5000
 
 install_prerequisites() {
-    echo "[*] Fixing potential dpkg locks and installing openssh-server..."
-    # آزاد کردن قفل‌های احتمالی apt و dpkg
+    echo "[*] Fixing potential dpkg locks and installing requirements..."
     sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/cache/apt/archives/lock
-    sudo dpkg --configure -a
+    sudo dpkg --configure -a || true
     
     sudo apt update
-    # نصب اجباری openssh-server برای رفع ارور عدم شناسایی sshd
     sudo apt install -y openssh-server python3 python3-pip python3-flask ufw sqlite3 bc
     
-    # تنظیم فایروال
+    # تنظیم ایمن فایروال بدون مسدود سازی دسترسی اصلی
     sudo ufw allow $WEB_PANEL_PORT/tcp comment 'Web Panel'
     sudo ufw allow 443/tcp comment 'SSH Port'
     sudo ufw allow 22/tcp comment 'SSH MGMT'
     sudo ufw --force enable
     
-    # هماهنگ‌سازی پورت ۴۴۳ روی SSH سرور
-    if ! grep -q "Port 443" /etc/ssh/sshd_config; then
-        echo "Port 443" | sudo tee -a /etc/ssh/sshd_config > /dev/null
-    fi
-    
-    # اطمینان از فعال و زنده بودن سرویس SSH
-    sudo systemctl daemon-reload
-    sudo systemctl enable ssh
-    sudo systemctl restart ssh
-    
     sudo mkdir -p /etc/custom-panel
 }
 
 create_panel_app() {
-    echo "[*] Creating Core Python Web GUI with Professional Dark UI..."
+    echo "[*] Creating Core Python Web GUI with Advanced Features..."
     sudo tee /etc/custom-panel/app.py > /dev/null << 'EOF'
 import os, subprocess, datetime, sqlite3, json
 from flask import Flask, request, render_template_string, redirect, send_file
 
 app = Flask(__name__)
-app.secret_key = "ssh_pro_premium_dark_key"
+app.secret_key = "ssh_pro_premium_dark_key_v2"
 DB_FILE = "/etc/custom-panel/panel.db"
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
+    # افزودن فیلدهای initial_gb و initial_days برای ذخیره تنظیمات اولیه جهت تمدید هوشمند
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             username TEXT PRIMARY KEY,
@@ -65,7 +54,9 @@ def init_db():
             limit_gb REAL,
             used_gb REAL DEFAULT 0.0,
             expire_date TEXT,
-            status TEXT DEFAULT 'Active'
+            status TEXT DEFAULT 'Active',
+            initial_gb REAL,
+            initial_days INTEGER
         )
     ''')
     conn.commit()
@@ -100,14 +91,14 @@ def update_traffic_and_limits():
     for user in active_users:
         username, limit, expire_date = user
         if expire_date < today:
-            subprocess.run(["sudo", "usermod", "-L", username])
+            subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             cursor.execute("UPDATE users SET status='Expired' WHERE username=?", (username,))
             continue
             
         cursor.execute("SELECT used_gb FROM users WHERE username=?", (username,))
         used = cursor.fetchone()[0]
         if used >= limit:
-            subprocess.run(["sudo", "usermod", "-L", username])
+            subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             cursor.execute("UPDATE users SET status='Traffic_Limit' WHERE username=?", (username,))
             
     conn.commit()
@@ -139,7 +130,7 @@ HTML_TEMPLATE = """
             direction: rtl; 
         }
         .container { 
-            max-width: 1250px; 
+            max-width: 1300px; 
             background: var(--card-bg); 
             padding: 30px; 
             border-radius: 12px; 
@@ -157,7 +148,7 @@ HTML_TEMPLATE = """
         input, select { 
             background: #111827; color: var(--text-main); 
             border: 1px solid var(--border-color); padding: 10px 14px; 
-            border-radius: 6px; flex: 1; min-width: 150px; transition: 0.2s;
+            border-radius: 6px; flex: 1; min-width: 120px; transition: 0.2s;
         }
         input:focus { border-color: var(--accent-blue); outline: none; }
         
@@ -220,12 +211,12 @@ HTML_TEMPLATE = """
                 <tr>
                     <th>نام کاربری</th>
                     <th>کلمه عبور</th>
-                    <th>حجم کل</th>
-                    <th>حجم مصرفی</th>
-                    <th>تاریخ انقضا</th>
+                    <th>حجم مجاز اولیه</th>
+                    <th>حجم مصرفی فعلی</th>
+                    <th>روزهای باقی‌مانده</th>
                     <th>وضعیت اتصال</th>
                     <th>وضعیت سیستم</th>
-                    <th>عملیات ویرایش و مدیریت سریع</th>
+                    <th>عملیات ویرایش و تمدید خودکار</th>
                 </tr>
             </thead>
             <tbody>
@@ -235,7 +226,13 @@ HTML_TEMPLATE = """
                     <td><code>{{ user[1] }}</code></td>
                     <td>{{ user[2] }} GB</td>
                     <td><span style="color:#38bdf8;">{{ "%.2f"|format(user[3]) }}</span> GB</td>
-                    <td>{{ user[4] }}</td>
+                    <td style="font-weight: bold; color: #f43f5e;">
+                        {% if user[6] >= 0 %}
+                            {{ user[6] }} روز
+                        {% else %}
+                            منقضی شده
+                        {% endif %}
+                    </td>
                     <td>
                         {% if user[0] in online_users %}
                         <span class="badge online">● آنلاین</span>
@@ -255,12 +252,12 @@ HTML_TEMPLATE = """
                     <td>
                         <form action="/edit" method="POST" style="display:inline-flex; gap:5px; background:none; padding:0;">
                             <input type="hidden" name="username" value="{{ user[0] }}">
-                            <input type="number" step="0.1" name="limit_gb" value="{{ user[2] }}" style="width:60px; min-width:auto; padding:4px; font-size:12px;">
-                            <input type="text" name="expire_date" value="{{ user[4] }}" style="width:90px; min-width:auto; padding:4px; font-size:12px;">
+                            <input type="number" step="0.1" name="limit_gb" value="{{ user[2] }}" style="width:65px; min-width:auto; padding:4px; font-size:12px;" title="حجم جدید">
+                            <input type="number" name="add_days" value="{{ user[7] }}" style="width:55px; min-width:auto; padding:4px; font-size:12px;" title="روزهای جدید">
                             <button type="submit" class="btn-yellow" style="padding:4px 8px; font-size:12px;">ویرایش</button>
                         </form>
                         
-                        <a href="/reset/{{ user[0] }}" style="text-decoration:none;"><button class="btn-green" style="padding:4px 8px; font-size:12px;">ریست</button></a>
+                        <a href="/renew/{{ user[0] }}" style="text-decoration:none;" title="تمدید مجدد بر اساس پکیج روز اول"><button class="btn-green" style="padding:4px 8px; font-size:12px;">🔄 تمدید خودکار</button></a>
                         <a href="/delete/{{ user[0] }}" style="text-decoration:none;"><button class="btn-red" style="padding:4px 8px; font-size:12px;">حذف</button></a>
                     </td>
                 </tr>
@@ -277,10 +274,26 @@ def index():
     update_traffic_and_limits()
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("SELECT username, password, limit_gb, used_gb, expire_date, status FROM users")
-    users = cursor.fetchall()
+    cursor.execute("SELECT username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days FROM users")
+    raw_users = cursor.fetchall()
     conn.close()
-    return render_template_string(HTML_TEMPLATE, users=users, online_users=get_online_users())
+    
+    processed_users = []
+    today = datetime.datetime.now().date()
+    
+    for row in raw_users:
+        username, password, limit_gb, used_gb, expire_date, status, init_gb, init_days = row
+        try:
+            exp_date = datetime.datetime.strptime(expire_date, "%Y-%m-%d").date()
+            remaining_days = (exp_date - today).days
+        except:
+            remaining_days = 0
+            
+        processed_users.append((
+            username, password, limit_gb, used_gb, expire_date, status, remaining_days, init_days
+        ))
+        
+    return render_template_string(HTML_TEMPLATE, users=processed_users, online_users=get_online_users())
 
 @app.route('/add', methods=['POST'])
 def add_user():
@@ -295,8 +308,8 @@ def add_user():
     try:
         subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True)
-        cursor.execute("INSERT INTO users (username, password, limit_gb, expire_date) VALUES (?, ?, ?, ?)",
-                       (username, password, limit_gb, expire_date))
+        cursor.execute("INSERT OR REPLACE INTO users (username, password, limit_gb, expire_date, initial_gb, initial_days) VALUES (?, ?, ?, ?, ?, ?)",
+                       (username, password, limit_gb, expire_date, limit_gb, days))
         conn.commit()
     except:
         pass
@@ -307,25 +320,41 @@ def add_user():
 def edit_user():
     username = request.form['username'].strip()
     limit_gb = float(request.form['limit_gb'].strip())
-    expire_date = request.form['expire_date'].strip()
+    add_days = int(request.form['add_days'].strip())
+    
+    expire_date = (datetime.datetime.now() + datetime.timedelta(days=add_days)).strftime("%Y-%m-%d")
     
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("UPDATE users SET limit_gb=?, expire_date=?, status='Active' WHERE username=?", (limit_gb, expire_date, username))
+    cursor.execute("UPDATE users SET limit_gb=?, expire_date=?, initial_gb=?, initial_days=?, status='Active' WHERE username=?", 
+                   (limit_gb, expire_date, limit_gb, add_days, username))
     conn.commit()
     conn.close()
     
     subprocess.run(["sudo", "usermod", "-U", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return redirect('/')
 
-@app.route('/reset/<username>')
-def reset_user(username):
+# تمدید خودکار و هوشمند بر اساس دیتای روز اول
+@app.route('/renew/<username>')
+def renew_user(username):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("UPDATE users SET used_gb=0.0, status='Active' WHERE username=?", (username,))
-    conn.commit()
+    cursor.execute("SELECT initial_gb, initial_days FROM users WHERE username=?", (username,))
+    row = cursor.fetchone()
+    
+    if row:
+        init_gb, init_days = row
+        # محاسبه تاریخ انقضای جدید از همین امروز
+        new_expire = (datetime.datetime.now() + datetime.timedelta(days=init_days)).strftime("%Y-%m-%d")
+        
+        # تمدید حجم، ریست مصرف به صفر و فعالسازی مجدد وضعیت کاربر
+        cursor.execute("UPDATE users SET used_gb=0.0, limit_gb=?, expire_date=?, status='Active' WHERE username=?", 
+                       (init_gb, new_expire, username))
+        conn.commit()
+        
+        subprocess.run(["sudo", "usermod", "-U", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
     conn.close()
-    subprocess.run(["sudo", "usermod", "-U", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return redirect('/')
 
 @app.route('/delete/<username>')
@@ -342,18 +371,18 @@ def delete_user(username):
 def download_backup():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("SELECT username, password, limit_gb, used_gb, expire_date, status FROM users")
+    cursor.execute("SELECT username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days FROM users")
     rows = cursor.fetchall()
     conn.close()
     
     backup_data = []
     for row in rows:
         backup_data.append({
-            "username": row[0], "password": row[1], "limit_gb": row[2],
-            "used_gb": row[3], "expire_date": row[4], "status": row[5]
+            "username": row[0], "password": row[1], "limit_gb": row[2], "used_gb": row[3],
+            "expire_date": row[4], "status": row[5], "initial_gb": row[6], "initial_days": row[7]
         })
         
-    backup_filename = f"/tmp/ssh_backup.json"
+    backup_filename = f"/tmp/ssh_premium_backup.json"
     with open(backup_filename, "w") as f:
         json.dump(backup_data, f, indent=4)
         
@@ -379,6 +408,8 @@ def restore_backup():
             used_gb = item['used_gb']
             expire_date = item['expire_date']
             status = item['status']
+            init_gb = item.get('initial_gb', limit_gb)
+            init_days = item.get('initial_days', 30)
             
             subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True)
@@ -386,9 +417,9 @@ def restore_backup():
                 subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
             cursor.execute('''
-                INSERT OR REPLACE INTO users (username, password, limit_gb, used_gb, expire_date, status)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (username, password, limit_gb, used_gb, expire_date, status))
+                INSERT OR REPLACE INTO users (username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (username, password, limit_gb, used_gb, expire_date, status, init_gb, init_days))
             
         conn.commit()
         conn.close()
@@ -422,7 +453,7 @@ if [ "$MAIN_CHOICE" == "1" ]; then
     install_prerequisites
     create_panel_app
     echo -e "\e[1;32m==================================================\e[0m"
-    echo -e "\e[1;32m✔ SUCCESS: SSH PRO PREMIUM DARK PANEL INSTALLED! \e[0m"
+    echo -e "\e[1;32m✔ SUCCESS: SYSTEM FIXED & PREMIUM PANEL RUNNING! \e[0m"
     echo -e "\e[1;36m🌐 Dark Interface URL: http://YOUR_SERVER_IP:5000 \e[0m"
     echo -e "\e[1;32m==================================================\e[0m"
 elif [ "$MAIN_CHOICE" == "2" ]; then
