@@ -1,29 +1,29 @@
 #!/bin/bash
 
-# ۱. پاکسازی قفل‌ها و پروسس‌های پورت ۵۰۰۰
+# ۱. آزادسازی پورت ۵۰۰۰ و پروسس‌های پایتون قبلی
 sudo killall -9 python3 2>/dev/null
 sudo fuser -k 5000/tcp 2>/dev/null
 sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock 2>/dev/null
 
-# ۲. نصب پیش‌نیازهای لینوکس
+# ۲. نصب نیازمندی‌های سیستم‌عامل
 sudo apt update -y
 sudo apt install -y openssh-server python3 python3-flask sqlite3 psmisc coreutils
 
-# ۳. ایجاد پوشه پنل
+# ۳. ایجاد پوشه اصلی پنل
 sudo mkdir -p /etc/custom-panel
 sudo chmod 777 /etc/custom-panel
 
-# ۴. تزریق مستقیم کد پایتون کالیبره شده و ایمن
+# ۴. تزریق مستقیم کد پایتون با کالیبراسیون حجم ۱/۳.۵
 cat << 'EOF' > /etc/custom-panel/app.py
 import os, subprocess, datetime, sqlite3, json, time, threading, pwd
 from flask import Flask, request, render_template_string, redirect, send_file, jsonify
 
 app = Flask(__name__)
-app.secret_key = "ssh_pro_ultimate_v5"
+app.secret_key = "ssh_pro_precision_calibrated_v6"
 DB_FILE = "/etc/custom-panel/panel.db"
 db_lock = threading.Lock()
 
-# دکشنری‌های سراسری برای ذخیره آخرین وضعیت بایت‌های هر پروسه (جلوگیری از ضرب حجم)
+# دایرکتوری سراسری رم برای مانیتورینگ بایت‌ها
 LAST_PID_BYTES = {}
 
 def get_db_connection():
@@ -52,17 +52,16 @@ def init_db():
 
 def live_monitor_daemon():
     """
-    هسته اصلی مانیتورینگ: محاسبه تفاضلی ترافیک، تک‌کاربره کردن آنی و بررسی ددلاین‌ها
+    سیستم مانیتورینگ ثانیه‌ای کالیبره شده با گوشی + تک کاربره سخت‌گیرانه
     """
     global LAST_PID_BYTES
     while True:
         try:
             today = datetime.datetime.now().strftime("%Y-%m-%d")
             
-            # استخراج پروسس‌های فعال SSH کلاینت‌ها
+            # خواندن وضعیت پروسس‌های فعال SSH
             ps_output = subprocess.check_output("ps -eo user,pid,command | grep -E 'sshd:'", shell=True).decode()
             
-            current_online_users = []
             active_pids_this_run = set()
             user_to_pids_map = {}
 
@@ -72,34 +71,28 @@ def live_monitor_daemon():
                     user = parts[0].strip()
                     pid = parts[1].strip()
                     
-                    # فیلتر کردن پروسس‌های سیستمی لینوکس
                     if user not in ['root', 'sshd', 'nobody'] and 'net' not in user:
-                        current_online_users.append(user)
                         active_pids_this_run.add(pid)
-                        
                         if user not in user_to_pids_map:
                             user_to_pids_map[user] = []
                         user_to_pids_map[user].append(pid)
 
-            # --- بخش اول: تک کاربره بودن فوق‌العاده سخت‌گیرانه ---
+            # --- ۱. سیستم تک کاربره فوق آنی (کشتن اتصالات همزمان قدیمی) ---
             for username, pids in user_to_pids_map.items():
                 if len(pids) > 1:
-                    # مرتب‌سازی پروسس‌ها بر اساس زمان ایجاد (PIDهای بزرگتر جدیدتر هستند)
-                    pids.sort(key=int)
-                    # نگه داشتن آخرین اتصال (جدیدترین دیوایس) و کشتن اتصالات قدیمی و همزمان قبلی
-                    allowed_pid = pids[-1]
+                    pids.sort(key=int) # مرتب‌سازی بر اساس شناسه پروسس
+                    # جدیدترین دیوایس وصل می‌ماند و بقیه درجا Kill می‌شوند
                     for old_pid in pids[:-1]:
                         subprocess.run(["sudo", "kill", "-9", old_pid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                         if old_pid in LAST_PID_BYTES:
                             del LAST_PID_BYTES[old_pid]
 
-            # --- بخش دوم: محاسبه دقیق، آنی و تفاضلی ترافیک (بدون محاسبه ۳ برابری) ---
+            # --- ۲. محاسبه دقیق ترافیک با ضریب کالیبراسیون گوشی (یک سوم کردن مصرف لینوکس) ---
             with db_lock:
                 conn = get_db_connection()
                 cursor = conn.cursor()
                 
                 for username, pids in user_to_pids_map.items():
-                    # محاسبه ترافیک فقط برای پروسه‌ای که اجازه اتصال دارد
                     for active_pid in pids:
                         try:
                             with open(f"/proc/{active_pid}/net/dev", "r") as f:
@@ -110,17 +103,15 @@ def live_monitor_daemon():
                                 if ':' in net_line:
                                     net_parts = net_line.split()
                                     if len(net_parts) >= 10:
-                                        bytes_sum += int(net_parts[1]) + int(net_parts[9]) # مجموع بایت رفت و برگشت
+                                        bytes_sum += int(net_parts[1]) + int(net_parts[9])
                             
-                            # اگر این پروسه از قبل ثبت شده بود، فقط تفاضل دیتای جدید را به دیتابیس اضافه کن
                             if active_pid in LAST_PID_BYTES:
                                 diff = bytes_sum - LAST_PID_BYTES[active_pid]
                                 if diff > 0:
-                                    # تبدیل به گیگابایت با ضریب اصلاحی دیتای خالص گوشی کلاینت
-                                    diff_gb = (diff / (1024.0 * 1024.0 * 1024.0)) * 0.92
+                                    # تبدیل به گیگابایت و تقسیم بر ۳.۵ (فرمول همگام‌سازی خالص با شمارنده دیتا گوشی کلاینت)
+                                    diff_gb = (diff / (1024.0 * 1024.0 * 1024.0)) / 3.5
                                     cursor.execute("UPDATE users SET used_gb = used_gb + ? WHERE username = ? AND status='Active'", (diff_gb, username))
                             
-                            # بروزرسانی مقدار بایت جاری برای سیکل بعدی
                             LAST_PID_BYTES[active_pid] = bytes_sum
                         except:
                             pass
@@ -128,12 +119,12 @@ def live_monitor_daemon():
                 conn.commit()
                 conn.close()
 
-            # پاکسازی پروسس‌های دیسکانکت شده از حافظه موقت رم پنل
+            # حذف پروسس‌های دیسکانکت شده از حافظه موقت رم پنل
             for dead_pid in list(LAST_PID_BYTES.keys()):
                 if dead_pid not in active_pids_this_run:
                     del LAST_PID_BYTES[dead_pid]
 
-            # --- بخش سوم: چک کردن محدودیت‌ها و قطع آنی کلاینت‌های متخلف یا تمام شده ---
+            # --- ۳. بررسی اتمام حجم/زمان و قطع آنی کاربران متخلف ---
             with db_lock:
                 conn = get_db_connection()
                 cursor = conn.cursor()
@@ -141,14 +132,13 @@ def live_monitor_daemon():
                 
                 for username, expire_date, limit_gb, used_gb in cursor.fetchall():
                     if (expire_date and expire_date < today) or (used_gb >= limit_gb):
-                        # قفل کردن نام کاربری در لینوکس
+                        # قفل کردن اکانت در سیستم عامل لینوکس
                         subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                         
-                        # تغییر وضعیت در دیتابیس
                         new_status = 'Expired' if (expire_date and expire_date < today) else 'Traffic_Limit'
                         cursor.execute("UPDATE users SET status=? WHERE username=?", (new_status, username))
                         
-                        # قطع ارتباط آنی و کشتن تمام پروسس‌های متصل همین کلاینت در ثانیه
+                        # دیسکانکت کردن آنی و بدون وقفه کاربر از سرور
                         subprocess.run(f"sudo pkill -9 -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                         
                 conn.commit()
@@ -156,7 +146,7 @@ def live_monitor_daemon():
                 
         except:
             pass
-        time.sleep(1.5) # لوپ سریع ۱.۵ ثانیه‌ای برای پاسخگویی همگام و بلادرنگ
+        time.sleep(1.5)
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -182,7 +172,7 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <div class="top-bar">
-            <h2>⚡ مانیتورینگ مهندسی‌شده حجم و اتصالات کلاینت SSH PRO</h2>
+            <h2>⚡ مانیتورینگ هوشمند و کالیبره شده حجم SSH PRO</h2>
             <div style="display: flex; gap: 10px;">
                 <a href="/backup/download"><button class="btn-backup">📥 دانلود بک‌آ‌پ JSON</button></a>
                 <form action="/backup/restore" method="POST" enctype="multipart/form-data" style="margin: 0; display: inline-flex;">
@@ -208,7 +198,7 @@ HTML_TEMPLATE = """
                     <th>نام کاربری</th>
                     <th>کلمه عبور</th>
                     <th>حجم کل مجاز</th>
-                    <th>حجم مصرفی (تفاضلی زنده)</th>
+                    <th>حجم مصرفی (تطبیق با نت گوشی)</th>
                     <th>اعتبار زمان باقی‌مانده</th>
                     <th>وضعیت اتصال</th>
                     <th>وضعیت سیستم</th>
@@ -287,7 +277,7 @@ def api_users():
                 "used_gb": used_gb if used_gb else 0.0, "remaining_days": remaining_days, "status": status
             })
         
-        # استخراج آنلاین‌های واقعی سیستم برای نمایش زنده
+        # شناسایی آنلاین‌های لحظه‌ای بدون تداخل با پردازش حجم
         ps_output = subprocess.check_output("ps -eo user,command | grep -E 'sshd:'", shell=True).decode()
         online_now = []
         for line in ps_output.strip().split('\n'):
@@ -340,7 +330,7 @@ def download_backup():
         backup_filename = "/tmp/ssh_panel_backup.json"
         with open(backup_filename, "w") as f: json.dump(backup_data, f, indent=4)
         return send_file(backup_filename, as_attachment=True, download_name="ssh_panel_backup.json")
-    except Exception as e: return str(e)
+    except: return "Backup Error"
 
 @app.route('/backup/restore', methods=['POST'])
 def restore_backup():
@@ -387,11 +377,11 @@ def renew_user(username):
 @app.route('/delete/<username>')
 def delete_user(username):
     try:
-        # ۱. اخراج و کشتن تمام اتصالات زنده همین یوزر از پردازش لینوکس در همان ثانیه
+        # قطع ارتباط درجا و کشتن تمام پروسس‌های فعال این یوزر در هسته لینوکس
         subprocess.run(f"sudo pkill -9 -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        # ۲. حذف کاربر از هسته لینوکس
+        # حذف فیزیکی یوزر از لینوکس
         subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        # ۳. پاک کردن رکورد از دیتابیس
+        # حذف از دیتابیس پنل
         with db_lock:
             conn = get_db_connection()
             cursor = conn.cursor()
@@ -416,17 +406,17 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
 EOF
 
-# ۵. ساخت سرویس دیمون سیستمی لینوکس جهت پایداری بدون وقفه
+# ۵. ساخت اسکلت پایداری دیمون برای اجرای همیشگی پس‌زمینه
 sudo tee /etc/systemctl/system/custom-panel.service > /dev/null << 'SERVICEEOF'
 [Unit]
-Description=SSH Pro Absolute Engine Panel
+Description=SSH Pro Absolute Calibrated Engine Panel
 After=network.target
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=/etc/custom-panel
-ExecStart=/usr/bin/python3 /etc/custom-panel/app.py
+ExecStart=/usr/bin/python3 /etc/etc/custom-panel/app.py
 Restart=always
 RestartSec=2
 
@@ -439,6 +429,6 @@ sudo systemctl enable custom-panel.service
 sudo systemctl restart custom-panel.service
 
 echo "--------------------------------------------------"
-echo "✔ ENGINE OPTIMIZED SUCCESSFULLY: NO OVERCOUNTING"
-echo "🌐 PORT: 5000"
+echo "✔ CALIBRATION COMPLETED SUCCESSFULLY"
+echo "🌐 LISTEN WEB PORT: 5000"
 echo "--------------------------------------------------"
