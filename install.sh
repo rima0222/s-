@@ -5,7 +5,7 @@ set -e
 
 clear
 echo -e "\e[1;34m==================================================\e[0m"
-echo -e "\e[1;36m    SSH PRO PANEL (ASYNC MONITORING & LIVE DATA)  \e[0m"
+echo -e "\e[1;36m    SSH PRO PANEL (FINAL FIXED & AUTO MIGRATE)    \e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
 
 DB_FILE="/etc/custom-panel/panel.db"
@@ -19,7 +19,6 @@ install_prerequisites() {
     sudo apt update
     sudo apt install -y openssh-server python3 python3-pip python3-flask ufw sqlite3 bc
     
-    # تنظیم ایمن فایروال بدون دستکاری پورت اصلی SSH سرور
     sudo ufw allow $WEB_PANEL_PORT/tcp comment 'Web Panel'
     sudo ufw allow 443/tcp comment 'SSH Port'
     sudo ufw allow 22/tcp comment 'SSH MGMT'
@@ -29,13 +28,13 @@ install_prerequisites() {
 }
 
 create_panel_app() {
-    echo "[*] Creating Core Asynchronous Python Web GUI..."
+    echo "[*] Creating Core Asynchronous Python Web GUI with Error Alerts..."
     sudo tee /etc/custom-panel/app.py > /dev/null << 'EOF'
 import os, subprocess, datetime, sqlite3, json, time, threading
-from flask import Flask, request, render_template_string, redirect, send_file, jsonify
+from flask import Flask, request, render_template_string, redirect, send_file, jsonify, flash
 
 app = Flask(__name__)
-app.secret_key = "ssh_pro_premium_async_key"
+app.secret_key = "ssh_pro_premium_async_fixed_key"
 DB_FILE = "/etc/custom-panel/panel.db"
 
 def init_db():
@@ -48,15 +47,29 @@ def init_db():
             limit_gb REAL,
             used_gb REAL DEFAULT 0.0,
             expire_date TEXT,
-            status TEXT DEFAULT 'Active',
-            initial_gb REAL,
-            initial_days INTEGER
+            status TEXT DEFAULT 'Active'
         )
     ''')
+    # حل مشکل عدم تطابق دیتابیس قدیمی با ساختار جدید (Auto Migration)
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN initial_gb REAL")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        cursor.execute("ALTER TABLE users ADD COLUMN initial_days INTEGER")
+    except sqlite3.OperationalError:
+        pass
+        
     conn.commit()
     conn.close()
 
-# ترد پس‌زمینه برای محاسبه ترافیک و مدیریت محدودیت‌ها بدون درگیر کردن پنل وب
+def get_online_users():
+    try:
+        output = subprocess.check_output("w -h | awk '{print $1}'", shell=True).decode()
+        return list(set(output.strip().split('\n')))
+    except:
+        return []
+
 def background_monitor():
     while True:
         try:
@@ -67,14 +80,12 @@ def background_monitor():
             
             today = datetime.datetime.now().strftime("%Y-%m-%d")
             
-            # استخراج کاربران آنلاین واقعی لینوکس
             try:
                 output = subprocess.check_output("w -h | awk '{print $1}'", shell=True).decode()
                 online_list = list(set(output.strip().split('\n')))
             except:
                 online_list = []
 
-            # کنترل محدودیت تک‌کاربره
             for user in set(online_list):
                 if user:
                     try:
@@ -86,18 +97,14 @@ def background_monitor():
 
             for user in active_users:
                 username, limit, expire_date = user
-                
-                # چک کردن زمان انقضا
-                if expire_date < today:
+                if expire_date and expire_date < today:
                     subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     cursor.execute("UPDATE users SET status='Expired' WHERE username=?", (username,))
                     continue
                 
-                # شبیه‌سازی خواندن حجم (می‌توانید منطق vnstat یا سیستم خود را اینجا اضافه کنید)
-                # در این ساختار حجم مصرفی از دیتابیس خوانده شده و برای جلوگیری از بلاک شدن بررسی می‌شود
                 cursor.execute("SELECT used_gb FROM users WHERE username=?", (username,))
                 used = cursor.fetchone()[0]
-                if used >= limit:
+                if used and limit and used >= limit:
                     subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     cursor.execute("UPDATE users SET status='Traffic_Limit' WHERE username=?", (username,))
             
@@ -106,7 +113,7 @@ def background_monitor():
         except Exception as e:
             print(f"Monitor Error: {e}")
         
-        time.sleep(10) # اجرای بی صدا هر ۱۰ ثانیه یکبار در پس زمینه
+        time.sleep(15)
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -144,11 +151,20 @@ HTML_TEMPLATE = """
         .badge { padding: 5px 10px; border-radius: 5px; font-size: 12px; font-weight: bold; display: inline-block; }
         .online { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid #10b981; }
         .offline { background: rgba(148, 163, 184, 0.2); color: #cbd5e1; border: 1px solid #94a3b8; }
+        .alert-flash { padding: 12px; background: rgba(239, 68, 68, 0.2); border: 1px solid var(--accent-red); color: #f87171; border-radius: 6px; margin-bottom: 20px; text-align: center; font-weight: bold; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>⚡ پنل مدیریت هوشمند SSH PRO (نسخه ضد قطعی)</h1>
+        <h1>⚡ پنل مدیریت هوشمند SSH PRO (نسخه اصلاح شده)</h1>
+        
+        {% with messages = get_flashed_messages() %}
+          {% if messages %}
+            {% for message in messages %}
+              <div class="alert-flash">⚠️ خطای سیستم: {{ message }}</div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
         
         <div class="grid-header">
             <div class="card-inner">
@@ -195,7 +211,6 @@ HTML_TEMPLATE = """
     </div>
 
     <script>
-        // تابع دریافت لایه زنده اطلاعات از سرور بدون رفرش کل صفحه
         async function fetchLiveStatus() {
             try {
                 const response = await fetch('/api/live_data');
@@ -240,7 +255,6 @@ HTML_TEMPLATE = """
             }
         }
 
-        // اجرای اولیه و تنظیم تایمر ۳ ثانیه‌ای برای زنده نگه‌داشتن آمار
         fetchLiveStatus();
         setInterval(fetchLiveStatus, 3000);
     </script>
@@ -252,181 +266,154 @@ HTML_TEMPLATE = """
 def index():
     return render_template_string(HTML_TEMPLATE)
 
-# ای‌پای اختصاصی برای فرستادن اطلاعات فوق سریع ترافیک و وضعیت آنلاین به فرانت‌اند
 @app.route('/api/live_data')
 def live_data():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT username, password, limit_gb, used_gb, expire_date, status, initial_days FROM users")
-    rows = cursor.fetchall()
-    conn.close()
-    
-    today = datetime.datetime.now().date()
-    users_list = []
-    
-    for row in rows:
-        username, password, limit_gb, used_gb, expire_date, status, init_days = row
-        try:
-            exp_date = datetime.datetime.strptime(expire_date, "%Y-%m-%d").date()
-            remaining_days = (exp_date - today).days
-        except:
-            remaining_days = 0
-            
-        users_list.append({
-            "username": username, "password": password, "limit_gb": limit_gb,
-            "used_gb": used_gb, "remaining_days": remaining_days, "status": status,
-            "initial_days": init_days
-        })
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("SELECT username, password, limit_gb, used_gb, expire_date, status, initial_days FROM users")
+        rows = cursor.fetchall()
+        conn.close()
         
-    return jsonify({
-        "users": users_list,
-        "online_users": get_online_users()
-    })
+        today = datetime.datetime.now().date()
+        users_list = []
+        
+        for row in rows:
+            username, password, limit_gb, used_gb, expire_date, status, init_days = row
+            try:
+                exp_date = datetime.datetime.strptime(expire_date, "%Y-%m-%d").date()
+                remaining_days = (exp_date - today).days
+            except:
+                remaining_days = 0
+                
+            users_list.append({
+                "username": username, "password": password, "limit_gb": limit_gb if limit_gb else 0.0,
+                "used_gb": used_gb if used_gb else 0.0, "remaining_days": remaining_days, "status": status,
+                "initial_days": init_days if init_days else 30
+            })
+            
+        return jsonify({"users": users_list, "online_users": get_online_users()})
+    except Exception as e:
+        return jsonify({"users": [], "online_users": [], "error": str(e)})
 
 @app.route('/add', methods=['POST'])
 def add_user():
-    username = request.form['username'].strip()
-    password = request.form['password'].strip()
-    limit_gb = float(request.form['limit_gb'].strip())
-    days = int(request.form['days'].strip())
-    expire_date = (datetime.datetime.now() + datetime.timedelta(days=days)).strftime("%Y-%m-%d")
-    
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
     try:
-        subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True)
-        cursor.execute("INSERT OR REPLACE INTO users (username, password, limit_gb, expire_date, initial_gb, initial_days) VALUES (?, ?, ?, ?, ?, ?)",
+        username = request.form['username'].strip()
+        password = request.form['password'].strip()
+        limit_gb = float(request.form['limit_gb'].strip())
+        days = int(request.form['days'].strip())
+        expire_date = (datetime.datetime.now() + datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+        
+        # ثبت در لینوکس هسته اصلی سرور
+        subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True, check=True)
+        
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR REPLACE INTO users (username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days) VALUES (?, ?, ?, 0.0, ?, 'Active', ?, ?)",
                        (username, password, limit_gb, expire_date, limit_gb, days))
         conn.commit()
-    except:
-        pass
-    conn.close()
+        conn.close()
+    except Exception as e:
+        flash(str(e))
     return redirect('/')
 
 @app.route('/edit', methods=['POST'])
 def edit_user():
-    username = request.form['username'].strip()
-    limit_gb = float(request.form['limit_gb'].strip())
-    add_days = int(request.form['add_days'].strip())
-    expire_date = (datetime.datetime.now() + datetime.timedelta(days=add_days)).strftime("%Y-%m-%d")
-    
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET limit_gb=?, expire_date=?, initial_gb=?, initial_days=?, status='Active' WHERE username=?", 
-                   (limit_gb, expire_date, limit_gb, add_days, username))
-    conn.commit()
-    conn.close()
-    
-    subprocess.run(["sudo", "usermod", "-U", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        username = request.form['username'].strip()
+        limit_gb = float(request.form['limit_gb'].strip())
+        add_days = int(request.form['add_days'].strip())
+        expire_date = (datetime.datetime.now() + datetime.timedelta(days=add_days)).strftime("%Y-%m-%d")
+        
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET limit_gb=?, expire_date=?, initial_gb=?, initial_days=?, status='Active' WHERE username=?", 
+                       (limit_gb, expire_date, limit_gb, add_days, username))
+        conn.commit()
+        conn.close()
+        
+        subprocess.run(["sudo", "usermod", "-U", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        flash(str(e))
     return redirect('/')
 
 @app.route('/renew/<username>')
 def renew_user(username):
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT initial_gb, initial_days FROM users WHERE username=?", (username,))
-    row = cursor.fetchone()
-    if row:
-        init_gb, init_days = row
-        new_expire = (datetime.datetime.now() + datetime.timedelta(days=init_days)).strftime("%Y-%m-%d")
-        cursor.execute("UPDATE users SET used_gb=0.0, limit_gb=?, expire_date=?, status='Active' WHERE username=?", 
-                       (init_gb, new_expire, username))
-        conn.commit()
-        subprocess.run(["sudo", "usermod", "-U", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    conn.close()
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("SELECT initial_gb, initial_days FROM users WHERE username=?", (username,))
+        row = cursor.fetchone()
+        if row:
+            init_gb, init_days = row
+            new_expire = (datetime.datetime.now() + datetime.timedelta(days=init_days)).strftime("%Y-%m-%d")
+            cursor.execute("UPDATE users SET used_gb=0.0, limit_gb=?, expire_date=?, status='Active' WHERE username=?", 
+                           (init_gb, new_expire, username))
+            conn.commit()
+            subprocess.run(["sudo", "usermod", "-U", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        conn.close()
+    except Exception as e:
+        flash(str(e))
     return redirect('/')
 
 @app.route('/delete/<username>')
 def delete_user(username):
-    subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM users WHERE username=?", (username,))
-    conn.commit()
-    conn.close()
+    try:
+        subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM users WHERE username=?", (username,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        flash(str(e))
     return redirect('/')
 
 @app.route('/backup/download')
 def download_backup():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days FROM users")
-    rows = cursor.fetchall()
-    conn.close()
-    
-    backup_data = []
-    for row in rows:
-        backup_data.append({
-            "username": row[0], "password": row[1], "limit_gb": row[2], "used_gb": row[3],
-            "expire_date": row[4], "status": row[5], "initial_gb": row[6], "initial_days": row[7]
-        })
-    backup_filename = f"/tmp/ssh_premium_backup.json"
-    with open(backup_filename, "w") as f:
-        json.dump(backup_data, f, indent=4)
-    return send_file(backup_filename, as_attachment=True, download_name="ssh_premium_backup.json")
+    try:
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("SELECT username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days FROM users")
+        rows = cursor.fetchall()
+        conn.close()
+        
+        backup_data = []
+        for row in rows:
+            backup_data.append({
+                "username": row[0], "password": row[1], "limit_gb": row[2], "used_gb": row[3],
+                "expire_date": row[4], "status": row[5], "initial_gb": row[6], "initial_days": row[7]
+            })
+        backup_filename = f"/tmp/ssh_premium_backup.json"
+        with open(backup_filename, "w") as f:
+            json.dump(backup_data, f, indent=4)
+        return send_file(backup_filename, as_attachment=True, download_name="ssh_premium_backup.json")
+    except Exception as e:
+        return str(e)
 
 @app.route('/backup/restore', methods=['POST'])
 def restore_backup():
-    if 'backup_file' not in request.files: return redirect('/')
-    file = request.files['backup_file']
-    if file.filename == '' or not file: return redirect('/')
-    
-    data = json.load(file)
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    for item in data:
-        username = item['username']
-        password = item['password']
-        limit_gb = item['limit_gb']
-        used_gb = item['used_gb']
-        expire_date = item['expire_date']
-        status = item['status']
-        init_gb = item.get('initial_gb', limit_gb)
-        init_days = item.get('initial_days', 30)
+    try:
+        if 'backup_file' not in request.files: return redirect('/')
+        file = request.files['backup_file']
+        if file.filename == '' or not file: return redirect('/')
         
-        subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True)
-        if status != 'Active':
-            subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        data = json.load(file)
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        for item in data:
+            username = item['username']
+            password = item['password']
+            limit_gb = item['limit_gb']
+            used_gb = item['used_gb']
+            expire_date = item['expire_date']
+            status = item['status']
+            init_gb = item.get('initial_gb', limit_gb)
+            init_days = item.get('initial_days', 30)
             
-        cursor.execute('''
-            INSERT OR REPLACE INTO users (username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (username, password, limit_gb, used_gb, expire_date, status, init_gb, init_days))
-    conn.commit()
-    conn.close()
-    return redirect('/')
-
-if __name__ == '__main__':
-    init_db()
-    # استارت زدن مانیتورینگ سیستم در یک نخ (Thread) مجزا برای جلوگیری از قطعی و فریز شدن وبسایت
-    threading.Thread(target=background_monitor, daemon=True).start()
-    app.run(host='0.0.0.0', port=5000)
-EOF
-
-    sudo tee /etc/systemd/system/custom-panel.service > /dev/null <<EOF
-[Unit]
-Description=SSH Advanced GUI Dark Panel
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/python3 /etc/custom-panel/app.py
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    sudo systemctl daemon-reload
-    sudo systemctl enable custom-panel.service
-    sudo systemctl restart custom-panel.service
-}
-
-install_prerequisites
-create_panel_app
-echo -e "\e[1;32m==================================================\e[0m"
-echo -e "\e[1;32m✔ SUCCESS: ANTI-CRASH LIVE PANEL INSTALLED!       \e[0m"
-echo -e "\e[1;36m🌐 Dark Interface URL: http://YOUR_SERVER_IP:5000 \e[0m"
-echo -e "\e[1;32m==================================================\e[0m"
+            # پاک کردن کاربر قدیمی اگر از قبل مانده باشد تا تداخلی پیش نیاید
+            subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], check=True, stdout=
