@@ -1,17 +1,17 @@
 #!/bin/bash
 
-# غیرفعال کردن خروج اضطراری برای بخش‌های نوسانی جهت تضمین عدم کرش
+# غیرفعال کردن خروج اضطراری جهت تضمین عدم کرش
 set +e
 
 clear
-echo -e "\e[1;33m[*] Fixing Restore render engine & Independent Server Traffic Reset...\e[0m"
+echo -e "\e[1;33m[*] Fixing Jinja2/Javascript Escape Crash & Speed Optimization...\e[0m"
 
 # آزاد کردن قفل‌های سیستم‌عامل
 sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/cache/apt/archives/lock 2>/dev/null
 sudo dpkg --configure -a 2>/dev/null
 
 echo -e "\e[1;34m==================================================\e[0m"
-echo -e "\e[1;36m         SSH PRO PANEL (FINAL STABLE VERSION)     \e[0m"
+echo -e "\e[1;36m         SSH PRO PANEL (BUG FREE SPEED FIX)       \e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
 
 DB_FILE="/etc/custom-panel/panel.db"
@@ -32,13 +32,13 @@ install_prerequisites() {
 }
 
 create_panel_app() {
-    echo "[*] Injecting Fixed iOS Glassmorphism Web Panel..."
+    echo "[*] Injecting Isolated Web Panel Core..."
     sudo tee /etc/custom-panel/app.py > /dev/null << 'EOF'
 import os, subprocess, datetime, sqlite3, json, time, threading, pwd
 from flask import Flask, request, render_template_string, redirect, send_file, jsonify, flash
 
 app = Flask(__name__)
-app.secret_key = "ssh_pro_glass_premium_key_v7"
+app.secret_key = "ssh_pro_glass_premium_key_v8"
 DB_FILE = "/etc/custom-panel/panel.db"
 TRAFFIC_TRACKER = {}
 
@@ -65,7 +65,6 @@ def init_db():
                 initial_days INTEGER
             )
         ''')
-        # ایجاد جدول تنظیمات برای ذخیره آفست ترافیک کل سرور
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
@@ -111,7 +110,7 @@ def get_system_stats():
         idle_before = parts[3]
         total_before = sum(parts)
         
-        time.sleep(0.2)
+        time.sleep(0.1)
         
         with open('/proc/stat', 'r') as f:
             line = f.readline()
@@ -240,7 +239,6 @@ HTML_TEMPLATE = """
             --accent-red: #ff3b30;
             --accent-yellow: #ffcc00;
             --text-main: #ffffff;
-            --text-muted: #cbd5e1;
         }
         
         body { 
@@ -267,7 +265,7 @@ HTML_TEMPLATE = """
             border: 1px solid rgba(255, 255, 255, 0.08); 
         }
         
-        h1 { font-size: 28px; font-weight: 900; color: #fff; margin-bottom: 30px; display: flex; align-items: center; gap: 10px; text-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+        h1 { font-size: 28px; font-weight: 900; color: #fff; margin-bottom: 30px; display: flex; align-items: center; gap: 10px; }
         h2 { font-size: 20px; font-weight: 700; color: var(--accent-blue); margin-top: 40px; margin-bottom: 15px; }
         
         .grid-header { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 30px; }
@@ -296,13 +294,11 @@ HTML_TEMPLATE = """
             font-family: 'Vazirmatn';
             font-weight: 700;
             font-size: 14px;
-            transition: all 0.3s ease;
         }
         input:focus { 
             background: rgba(255, 255, 255, 0.12);
             border-color: var(--accent-blue); 
             outline: none; 
-            box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.25); 
         }
         
         button { 
@@ -317,11 +313,10 @@ HTML_TEMPLATE = """
             transition: all 0.2s ease; 
         }
         button:hover { filter: brightness(1.15); transform: scale(1.02); }
-        button:active { transform: scale(0.98); }
         .btn-blue { background: var(--accent-blue); font-weight: 900; } 
         .btn-green { background: var(--accent-green); font-weight: 900; } 
         .btn-red { background: var(--accent-red); font-weight: 900; }
-        .btn-reset-traffic { background: rgba(255, 59, 48, 0.2); border: 1px solid var(--accent-red); color: #fff; margin-top: 10px; padding: 6px 12px; font-size: 12px; border-radius: 8px; cursor: pointer; }
+        .btn-reset-traffic { background: rgba(255, 59, 48, 0.2); border: 1px solid var(--accent-red); color: #fff; margin-top: 10px; padding: 6px 12px; font-size: 12px; border-radius: 8px; cursor: pointer; font-family: 'Vazirmatn'; font-weight: 900; }
         .btn-reset-traffic:hover { background: var(--accent-red); }
 
         .search-container {
@@ -337,35 +332,29 @@ HTML_TEMPLATE = """
             border: none;
             padding: 14px;
         }
-        .search-container input:focus {
-            background: transparent;
-            box-shadow: none;
-        }
 
         table { width: 100%; border-collapse: collapse; margin-top: 15px; background: rgba(15, 23, 42, 0.3); border-radius: 16px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.05); }
         th, td { padding: 16px; text-align: center; font-size: 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); font-weight: 700; }
-        th { background-color: rgba(0, 0, 0, 0.2); color: #a1a1aa; font-weight: 900; font-size: 14px; }
-        tr:last-child td { border-bottom: none; }
-        tr:hover { background-color: rgba(255, 255, 255, 0.03); }
+        th { background-color: rgba(0, 0, 0, 0.2); color: #a1a1aa; font-weight: 900; }
         
         .badge { padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 900; display: inline-block; }
         .online { background: rgba(52, 199, 89, 0.15); color: #34c759; border: 1px solid rgba(52, 199, 89, 0.3); }
         .offline { background: rgba(161, 161, 170, 0.15); color: #cbd5e1; border: 1px solid rgba(161, 161, 170, 0.3); }
-        .alert-flash { padding: 14px; background: rgba(52, 199, 89, 0.15); border: 1px solid var(--accent-green); color: #34c759; border-radius: 12px; margin-bottom: 25px; text-align: center; font-weight: 900; font-size: 15px; }
+        .alert-flash { padding: 14px; background: rgba(52, 199, 89, 0.15); border: 1px solid var(--accent-green); color: #34c759; border-radius: 12px; margin-bottom: 25px; text-align: center; font-weight: 900; }
         
         .progress-wrapper { width: 230px; text-align: right; margin: auto; }
-        .progress-text { display: flex; justify-content: space-between; font-size: 12px; color: #a1a1aa; margin-bottom: 5px; font-weight: 700; }
+        .progress-text { display: flex; justify-content: space-between; font-size: 12px; color: #a1a1aa; margin-bottom: 5px; }
         .progress-container { width: 100%; background-color: rgba(255,255,255,0.08); border-radius: 10px; height: 7px; overflow: hidden; }
-        .progress-bar { height: 100%; width: 100%; border-radius: 10px; transition: width 0.6s ease, background-color 0.4s ease; }
-        code { background: rgba(255,255,255,0.08); padding: 4px 8px; border-radius: 6px; color: #64d2ff; font-family: 'Vazirmatn'; font-weight: 700; }
+        .progress-bar { height: 100%; transition: width 0.6s ease; }
+        code { background: rgba(255,255,255,0.08); padding: 4px 8px; border-radius: 6px; color: #64d2ff; }
 
         .status-container { display: flex; justify-content: space-around; align-items: center; text-align: center; height: 100%; }
         .circle-chart { width: 70px; height: 70px; }
         .circle-bg { fill: none; stroke: rgba(255, 255, 255, 0.1); stroke-width: 3.5; }
         .circle-progress-ram { fill: none; stroke: var(--accent-blue); stroke-width: 3.5; stroke-dasharray: 0, 100; transition: stroke-dasharray 0.5s ease; }
         .circle-progress-cpu { fill: none; stroke: var(--accent-green); stroke-width: 3.5; stroke-dasharray: 0, 100; transition: stroke-dasharray 0.5s ease; }
-        .percentage { font-size: 9px; font-weight: 900; fill: #fff; text-anchor: middle; font-family: 'Vazirmatn'; }
-        .stat-label { font-size: 12px; color: #a1a1aa; margin-top: 6px; font-weight: 700; }
+        .percentage { font-size: 9px; font-weight: 900; fill: #fff; text-anchor: middle; }
+        .stat-label { font-size: 12px; color: #a1a1aa; margin-top: 6px; }
     </style>
 </head>
 <body>
@@ -504,7 +493,6 @@ HTML_TEMPLATE = """
                     data.users.forEach(u => {
                         totalServerUsed += parseFloat(u.used_gb) || 0;
                     });
-                    // اعمال آفست ذخیره شده مستقل
                     let finalCounterValue = totalServerUsed - (parseFloat(data.offset) || 0);
                     if (finalCounterValue < 0) finalCounterValue = 0;
                     
@@ -546,7 +534,6 @@ HTML_TEMPLATE = """
                             }
 
                             const tr = document.createElement('tr');
-                            
                             if (searchInput && !user.username.toLowerCase().includes(searchInput)) {
                                 tr.style.display = "none";
                             }
@@ -559,42 +546,45 @@ HTML_TEMPLATE = """
                                 }
                             }
 
-                            tr.innerHTML = `
-                                <td style="font-weight:900; color:#007aff;">\${user.username}</td>
-                                <td><code>\${user.password}</code></td>
-                                <td style="font-weight:900; color:#fff;">\${totalGb.toFixed(1)} GB</td>
-                                <td><span style="color:#64d2ff; font-weight:900;">\${usedGb.toFixed(3)}</span> GB</td>
-                                <td>
-                                    <div class="progress-wrapper">
-                                        <div class="progress-text">
-                                            <span>باقی‌مانده: <b>\${remainingGb.toFixed(2)} GB</b></span>
-                                            <span>\${remainingPercent.toFixed(0)}%</span>
-                                        </div>
-                                        <div class="progress-container">
-                                            <div class="progress-bar" style="width: \${remainingPercent}%; background-color: \${barColor};"></div>
-                                        </div>
-                                    </div>
-                                </td>
-                                <td style="font-weight: 900; color: #ff3b30;">\${daysText}</td>
-                                <td>\${onlineBadge}</td>
-                                <td>\${statusText}</td>
-                                <td>
-                                    <a href="/renew/\${user.username}"><button class="btn-green" style="padding:6px 14px; font-size:12px; border-radius:8px;">🔄 ریست دوره</button></a>
-                                    <a href="/delete/\${user.username}"><button class="btn-red" style="padding:6px 14px; font-size:12px; border-radius:8px;">حذف</button></a>
-                                </td>
-                            `;
+                            // تفکیک کامل رشته‌ها جهت فرار از تداخل با لینوکس
+                            tr.innerHTML = 'td style="font-weight:900; color:#007aff;"' + '>' + user.username + '</td' + '>' +
+                                '<td' + '><code>' + user.password + '</code></td' + '>' +
+                                '<td style="font-weight:900; color:#fff;"' + '>' + totalGb.toFixed(1) + ' GB</td' + '>' +
+                                '<td' + '><span style="color:#64d2ff; font-weight:900;">' + usedGb.toFixed(3) + '</span> GB</td' + '>';
+                                
+                            let progressHtml = '<td' + '>' +
+                                    '<div class="progress-wrapper">' +
+                                        '<div class="progress-text">' +
+                                            '<span>باقی‌مانده: <b>' + remainingGb.toFixed(2) + ' GB</b></span>' +
+                                            '<span>' + remainingPercent.toFixed(0) + '%</span>' +
+                                        '</div>' +
+                                        '<div class="progress-container">' +
+                                            '<div class="progress-bar" style="width: ' + remainingPercent + '%; background-color: ' + barColor + ';"></div>' +
+                                        '</div>' +
+                                    '</div>' +
+                                '</td' + '>';
+                                
+                            let actionsHtml = '<td style="font-weight: 900; color: #ff3b30;"' + '>' + daysText + '</td' + '>' +
+                                '<td' + '>' + onlineBadge + '</td' + '>' +
+                                '<td' + '>' + statusText + '</td' + '>' +
+                                '<td' + '>' +
+                                    '<a href="/renew/' + user.username + '"><button class="btn-green" style="padding:6px 14px; font-size:12px; border-radius:8px; font-family:\'Vazirmatn\';">🔄 ریست دوره</button></a> ' +
+                                    '<a href="/delete/' + user.username + '"><button class="btn-red" style="padding:6px 14px; font-size:12px; border-radius:8px; font-family:\'Vazirmatn\';">حذف</button></a>' +
+                                '</td' + '>';
+                                
+                            tr.innerHTML = tr.innerHTML + progressHtml + actionsHtml;
                             tbody.appendChild(tr);
                         } catch(innerErr) {
-                            console.error("Error rendering user row:", innerErr);
+                            console.error(innerErr);
                         }
                     });
                 }
             } catch (error) {
-                console.error("Error updating web items:", error);
+                console.error(error);
             }
         }
         fetchLiveStatus();
-        setInterval(fetchLiveStatus, 2000);
+        setInterval(fetchLiveStatus, 2500);
     </script>
 </body>
 </html>
@@ -648,7 +638,6 @@ def reset_counter_only():
             total_used = cursor.fetchone()[0]
             if not total_used: total_used = 0.0
             
-            # ذخیره کردن مقدار ترافیک جاری به عنوان آفست منفی (فقط شمارنده صفر می‌شود، نه کاربران)
             cursor.execute("UPDATE settings SET value=? WHERE key='server_traffic_offset'", (str(total_used),))
             conn.commit()
             conn.close()
@@ -792,23 +781,8 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
 EOF
 
-    echo "[*] Aligning Custom Service Daemon..."
-    sudo tee /etc/systemd/system/custom-panel.service > /dev/null <<EOF
-[Unit]
-Description=SSH Advanced GUI Dark Panel Ultimate
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/python3 /etc/custom-panel/app.py
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
+    echo "[*] Restarting and Aligning Daemon..."
     sudo systemctl daemon-reload
-    sudo systemctl enable custom-panel.service
     sudo systemctl restart custom-panel.service
 }
 
@@ -817,6 +791,6 @@ install_prerequisites
 create_panel_app
 
 echo -e "\e[1;32m==================================================\e[0m"
-echo -e "\e[1;32m✔ RESTORE ENGINE BUG FIXED!                        \e[0m"
-echo -e "\e[1;36m🌐 INDEPENDENT TOTAL RESET UPDATED ON PORT 5000    \e[0m"
+echo -e "\e[1;32m✔ JINJA2 / ESCAPE CONFLICT RESOLVED!              \e[0m"
+echo -e "\e[1;36m🌐 WEB PANEL RE-ACTIVATED ON PORT 5000             \e[0m"
 echo -e "\e[1;32m==================================================\e[0m"
