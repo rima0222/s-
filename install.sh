@@ -1,18 +1,17 @@
 #!/bin/bash
 
-# ۱. آزادسازی پورت ۵۰۰۰ و پاکسازی پروسس‌های تداخلی لینوکس
+# ۱. آزادسازی پورت ۵۰۰۰ و پاکسازی پروسس‌های قدیمی پایتون
 sudo killall -9 python3 2>/dev/null
 sudo fuser -k 5000/tcp 2>/dev/null
 sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock 2>/dev/null
 
-# ۲. پیکربندی و باز کردن پورت‌های لازم در فایروال لینوکس (UFW & Iptables)
+# ۲. پیکربندی خودکار فایروال اوبونتو و باز کردن پورت‌های لازم
 echo "[*] Configuring firewall rules and opening port 5000..."
 sudo ufw allow 5000/tcp >/dev/null 2>&1
 sudo ufw allow 22/tcp >/dev/null 2>&1
 sudo ufw --force enable >/dev/null 2>&1
 sudo ufw reload >/dev/null 2>&1
 
-# اطمینان از باز بودن پورت در فایروال خام iptables
 sudo iptables -I INPUT -p tcp --dport 5000 -j ACCEPT 2>/dev/null
 sudo iptables -I INPUT -p tcp --dport 22 -j ACCEPT 2>/dev/null
 
@@ -20,17 +19,17 @@ sudo iptables -I INPUT -p tcp --dport 22 -j ACCEPT 2>/dev/null
 sudo apt update -y
 sudo apt install -y openssh-server python3 python3-flask sqlite3 psmisc coreutils
 
-# ۴. ایجاد دایرکتوری اصلی پنل شیشه‌ای
+# ۴. ایجاد دایرکتوری اصلی پنل
 sudo mkdir -p /etc/custom-panel
 sudo chmod 755 /etc/custom-panel
 
-# ۵. تزریق کد پایتون اصلاح‌شده و بدون باگ سینتکس
+# ۵. تزریق کد پایتون به همراه قابلیت سرچ زنده کلاینت‌ساید و ظاهر شیشه‌ای
 cat << 'EOF' > /etc/custom-panel/app.py
 import os, subprocess, datetime, sqlite3, json, time, threading, pwd
 from flask import Flask, request, render_template_string, redirect, send_file, jsonify
 
 app = Flask(__name__)
-app.secret_key = "ssh_pro_precision_final_v8"
+app.secret_key = "ssh_pro_glass_search_v9"
 DB_FILE = "/etc/custom-panel/panel.db"
 db_lock = threading.Lock()
 
@@ -81,7 +80,7 @@ def live_monitor_daemon():
                             user_to_pids_map[user] = []
                         user_to_pids_map[user].append(pid)
 
-            # سیستم تک‌کاربره آنی (حفظ اتصال آخر و کشتن سشن‌های موازی قبلی)
+            # سیستم تک‌کاربره سخت‌گیرانه (قطع کانکشن‌های همزمان قدیمی)
             for username, pids in user_to_pids_map.items():
                 if len(pids) > 1:
                     pids.sort(key=int)
@@ -90,7 +89,7 @@ def live_monitor_daemon():
                         if old_pid in LAST_PID_BYTES:
                             del LAST_PID_BYTES[old_pid]
 
-            # محاسبه دقیق ترافیک تفاضلی و کالیبره کردن آن (تقسیم بر فاکتور ۳.۵ برای هماهنگی با گوشی)
+            # محاسبه ترافیک مصرفی و تقسیم بر فاکتور کالیبراسیون ۳.۵
             with db_lock:
                 conn = get_db_connection()
                 cursor = conn.cursor()
@@ -120,7 +119,7 @@ def live_monitor_daemon():
                 if dead_pid not in active_pids_this_run:
                     del LAST_PID_BYTES[dead_pid]
 
-            # قطع دسترسی آنی کاربران منقضی شده یا اتمام حجم یافته
+            # مسدودسازی خودکار کاربران اتمام ترافیک یا اتمام زمان یافته
             with db_lock:
                 conn = get_db_connection()
                 cursor = conn.cursor()
@@ -146,11 +145,18 @@ HTML_TEMPLATE = """
         body { font-family: sans-serif; background: #0f172a; color: #fff; padding: 20px; direction: rtl; }
         .container { max-width: 1100px; margin: auto; background: #1e293b; padding: 20px; border-radius: 10px; }
         .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 1px solid #334155; padding-bottom: 15px; }
-        form { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-bottom: 25px; }
+        .stat-card { background: #1a2333; padding: 15px; border-radius: 8px; border: 1px solid #334155; text-align: center; }
+        .stat-card h4 { margin: 0 0 10px 0; color: #94a3b8; font-size: 14px; }
+        .stat-card .val { font-size: 22px; font-weight: bold; color: #38bdf8; }
+        form { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; background: #1a2333; padding: 15px; border-radius: 8px; border: 1px solid #334155; }
         input, button { padding: 10px; border-radius: 5px; border: none; font-weight: bold; }
         input { background: #334155; color: #fff; flex: 1; }
         button { cursor: pointer; background: #0284c7; color: white; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: #0f172a; }
+        .search-container { margin: 20px 0 10px 0; display: flex; }
+        .search-input { width: 100%; padding: 12px; background: #1e293b; border: 2px solid #334155; border-radius: 6px; color: #fff; font-size: 14px; }
+        .search-input:focus { border-color: #38bdf8; outline: none; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; background: #0f172a; }
         th, td { padding: 12px; text-align: center; border-bottom: 1px solid #334155; }
         th { background: #1e293b; color: #94a3b8; }
         .btn-backup { background: #10b981; }
@@ -160,25 +166,45 @@ HTML_TEMPLATE = """
 <body>
     <div class="container">
         <div class="top-bar">
-            <h2>⚡ پنل شیشه‌ای کالیبره و فوق پایدار SSH PRO</h2>
+            <h2>⚡ کنترل پنل هوشمند شیشه‌ای SSH PRO</h2>
             <div style="display: flex; gap: 10px;">
-                <a href="/backup/download"><button class="btn-backup">📥 دانلود بک‌آ‌پ JSON</button></a>
-                <form action="/backup/restore" method="POST" enctype="multipart/form-data" style="margin: 0; display: inline-flex;">
+                <a href="/backup/download"><button class="btn-backup">📥 دانلود فایل بک‌آپ</button></a>
+                <form action="/backup/restore" method="POST" enctype="multipart/form-data" style="margin: 0; padding:0; border:none; display: inline-flex;">
                     <label class="file-input-label">
-                        📤 بازگردانی سریع بک‌آپ
+                        📤 ریستور کل کاربران
                         <input type="file" name="backup_file" onchange="this.form.submit()" style="display: none;">
                     </label>
                 </form>
             </div>
         </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h4>📊 وضعیت زنده منابع سرور</h4>
+                <div class="val" style="color: #a855f7;">اصلی / فعال</div>
+            </div>
+            <div class="stat-card">
+                <h4>📉 مجموع ترافیک کل کاربران</h4>
+                <div id="total-traffic-card" class="val">0.00 GB</div>
+            </div>
+        </div>
         
+        <h3>✨ ساخت اکانت تک‌کاربره جدید</h3>
         <form action="/add" method="POST">
             <input type="text" name="username" placeholder="نام کاربری جدید" required>
             <input type="text" name="password" placeholder="کلمه عبور" required>
             <input type="number" step="0.1" name="limit_gb" placeholder="حجم مجاز (GB)" required>
             <input type="number" name="days" placeholder="مدت اعتبار (روز)" required>
-            <button type="submit">➕ ساخت و فعال‌سازی اکانت</button>
+            <button type="submit" style="background: #0ea5e9;">➕ ساخت و فعال‌سازی اکانت</button>
         </form>
+
+        <div class="top-bar" style="margin-top: 30px; margin-bottom: 5px; border: none; padding-bottom: 0;">
+            <h3>👥 وضعیت مصرف ترافیک و مانیتورینگ آنلاین کاربران</h3>
+        </div>
+        
+        <div class="search-container">
+            <input type="text" id="search-bar" class="search-input" placeholder="🔍 جستجو در نام کاربری یا وضعیت سیستم کلاینت..." oninput="filterUsers()">
+        </div>
 
         <table>
             <thead>
@@ -198,37 +224,69 @@ HTML_TEMPLATE = """
     </div>
 
     <script>
+        let allUsersData = [];
+
         async function updateData() {
             try {
                 const res = await fetch('/api/users');
                 const data = await res.json();
-                const tbody = document.getElementById('user-rows');
-                tbody.innerHTML = '';
+                allUsersData = data.users;
+                
+                // محاسبه مجموع ترافیک کل مصرفی در کارت مدیریت
+                let totalConsumed = 0;
+                data.users.forEach(u => { totalConsumed += u.used_gb; });
+                document.getElementById('total-traffic-card').innerText = totalConsumed.toFixed(3) + " GB";
 
-                data.users.forEach(user => {
-                    const isOnline = data.online.map(o => o.trim().toLowerCase()).includes(user.username.trim().toLowerCase());
-                    const onlineStatus = isOnline ? '<span style="color:#22c55e; font-weight:bold;">● آنلاین (Live)</span>' : '<span style="color:#94a3b8;">○ آفلاین</span>';
-                    
-                    let statusText = '<span style="color:#22c55e;">فعال</span>';
-                    if (user.status === 'Expired') statusText = '<span style="color:#ef4444;">منقضی شده</span>';
-                    if (user.status === 'Traffic_Limit') statusText = '<span style="color:#eab308;">اتمام حجم</span>';
-
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = '<td><b>' + user.username + '</b></td>' +
-                                   '<td><code>' + user.password + '</code></td>' +
-                                   '<td>' + user.limit_gb + ' GB</td>' +
-                                   '<td style="color:#38bdf8; font-weight:bold;">' + user.used_gb.toFixed(4) + ' GB</td>' +
-                                   '<td>' + user.remaining_days + ' روز</td>' +
-                                   '<td>' + onlineStatus + '</td>' +
-                                   '<td>' + statusText + '</td>' +
-                                   '<td>' +
-                                       '<a href="/renew/' + user.username + '"><button style="background:#22c55e; padding:5px 10px; font-size:12px; margin-left:5px;">تمدید</button></a>' +
-                                       '<a href="/delete/' + user.username + '"><button style="background:#ef4444; padding:5px 10px; font-size:12px;">حذف</button></a>' +
-                                   '</td>';
-                    tbody.appendChild(tr);
-                });
+                renderTable(data.online);
             } catch(e) {}
         }
+
+        function renderTable(onlineList = []) {
+            const tbody = document.getElementById('user-rows');
+            const searchKeyword = document.getElementById('search-bar').value.trim().toLowerCase();
+            tbody.innerHTML = '';
+
+            allUsersData.forEach(user => {
+                const usernameLower = user.username.toLowerCase();
+                let statusTextRaw = 'فعال';
+                if (user.status === 'Expired') statusTextRaw = 'منقضی شده';
+                if (user.status === 'Traffic_Limit') statusTextRaw = 'اتمام حجم';
+
+                // فیلترینگ کلاینت‌ساید بر اساس کلمه کلیدی سرچ بار
+                if (searchKeyword !== '' && !usernameLower.includes(searchKeyword) && !statusTextRaw.toLowerCase().includes(searchKeyword)) {
+                    return; 
+                }
+
+                const isOnline = onlineList.map(o => o.trim().toLowerCase()).includes(user.username.trim().toLowerCase());
+                const onlineStatus = isOnline ? '<span style="color:#22c55e; font-weight:bold;">● آنلاین (Live)</span>' : '<span style="color:#94a3b8;">○ آفلاین</span>';
+                
+                let statusText = '<span style="color:#22c55e;">فعال</span>';
+                if (user.status === 'Expired') statusText = '<span style="color:#ef4444;">منقضی شده</span>';
+                if (user.status === 'Traffic_Limit') statusText = '<span style="color:#eab308;">اتمام حجم</span>';
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = '<td><b>' + user.username + '</b></td>' +
+                               '<td><code>' + user.password + '</code></td>' +
+                               '<td>' + user.limit_gb + ' GB</td>' +
+                               '<td style="color:#38bdf8; font-weight:bold;">' + user.used_gb.toFixed(4) + ' GB</td>' +
+                               '<td>' + user.remaining_days + ' روز</td>' +
+                               '<td>' + onlineStatus + '</td>' +
+                               '<td>' + statusText + '</td>' +
+                               '<td>' +
+                                   '<a href="/renew/' + user.username + '"><button style="background:#22c55e; padding:5px 10px; font-size:12px; margin-left:5px;">تمدید</button></a>' +
+                                   '<a href="/delete/' + user.username + '"><button style="background:#ef4444; padding:5px 10px; font-size:12px;">حذف</button></a>' +
+                               '</td>';
+                tbody.appendChild(tr);
+            });
+        }
+
+        function filterUsers() {
+            // ایجاد فیلترینگ آنی هنگام زدن دکمه کیبورد بدون تداخل با پولینگ
+            fetch('/api/users').then(res => res.json()).then(data => {
+                renderTable(data.online);
+            }).catch(()=>{});
+        }
+
         updateData();
         setInterval(updateData, 2000);
     </script>
@@ -390,7 +448,7 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
 EOF
 
-# ۶. ساخت فایل سرویس با اصلاح مسیر ۱۰۰٪ تضمینی لینوکس اوبونتو
+# ۶. ساخت فایل دیمون لینوکس در مسیر فیکس شده و استاندارد اوبونتو
 sudo tee /etc/systemd/system/custom-panel.service > /dev/null << 'SERVICEEOF'
 [Unit]
 Description=SSH Pro Absolute Calibrated Engine Panel
@@ -408,13 +466,12 @@ RestartSec=2
 WantedBy=multi-user.target
 SERVICEEOF
 
-# ۷. ریلود، فعال‌سازی دایمی و استارت نهایی دیمون سیستمی بدون خطای مسیر
+# ۷. لود دیمون‌ها و استارت مجدد سرویس سیستم‌عامل
 sudo systemctl daemon-reload
 sudo systemctl enable custom-panel.service
 sudo systemctl restart custom-panel.service
 
 echo "--------------------------------------------------"
-echo "✔ FIREWALLS CONFIGURATION INJECTED SUCCESSFULLY"
-echo "✔ PORT 5000 OPENED AND SYSTEMD ENGINE IS LIVE"
-echo "🌐 LISTEN WEB PORT: http://144.172.116.73:5000"
+echo "✔ FIREWALLS AND SEARCH ENGINE INJECTED SUCCESSFULLY"
+echo "🌐 PANEL ADDRESS: http://144.172.116.73:5000"
 echo "--------------------------------------------------"
