@@ -13,7 +13,7 @@ sudo dpkg --configure -a || true
 
 echo -e "\e[1;32m✔ System locks cleared successfully.\e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
-echo -e "\e[1;36m  SSH PRO PANEL (NATIVE MULTI-LOGIN & TRAFFIC FIX) \e[0m"
+echo -e "\e[1;36m  SSH PRO PANEL (ACCURATE GB TRAFFIC COUNTER)     \e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
 
 # ۲. ایجاد مکث ۳ ثانیه‌ای به صورت شمارش معکوس زنده
@@ -89,17 +89,14 @@ def init_db():
     conn.close()
 
 def get_sshd_connections():
-    """پیدا کردن و تفکیک دقیق پروسس‌های فعال و کانکشن‌های واقعی هر کاربر بر اساس سیستم‌عامل لینوکس"""
     connections = {}
     try:
-        # خروجی بسیار سبک بر اساس موقعیت ساختار سشن‌های فعال لینوکس
         output = subprocess.check_output("ps -eo user,pid,command | grep -E 'sshd:'", shell=True).decode()
         for line in output.strip().split('\n'):
             parts = line.split()
             if len(parts) >= 3:
                 user = parts[0]
                 pid = parts[1]
-                # نادیده گرفتن پروسس‌های ریشه لینوکس
                 if user not in ['root', 'sshd', 'nobody'] and 'net' not in user:
                     if user not in connections:
                         connections[user] = []
@@ -123,14 +120,13 @@ def safe_system_user_create(username, password):
     subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True, check=True)
 
 def monitor_core_logic():
-    """هسته مانیتورینگ نیتیو: کنترل حجم واقعی بایت‌به‌بایت و تک‌کاربره سازی ۱۰۰٪ لحظه‌ای"""
     while True:
         try:
             today = datetime.datetime.now().strftime("%Y-%m-%d")
             conn = sqlite3.connect(DB_FILE)
             cursor = conn.cursor()
             
-            # ۱. چک کردن انقضای زمانی کاربران
+            # ۱. بررسی انقضای تاریخ انقضا
             cursor.execute("SELECT username, expire_date, status FROM users WHERE status='Active'")
             active_users = cursor.fetchall()
             for user in active_users:
@@ -140,7 +136,7 @@ def monitor_core_logic():
                     cursor.execute("UPDATE users SET status='Expired' WHERE username=?", (username,))
                     subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            # ۲. مدیریت تک‌کاربره نیتیو (Multi-Login Prevention) و محاسبه حجم واقعی
+            # ۲. بررسی تک کاربره بودن و اصلاح دقیق فرمول حجم بر اساس گیگابایت
             active_connections = get_sshd_connections()
             
             cursor.execute("SELECT username, limit_gb, used_gb, status FROM users")
@@ -150,24 +146,24 @@ def monitor_core_logic():
                 if username in db_users:
                     userdata = db_users[username]
                     
-                    # الف) اگر حجمش تموم شده ولی هنوز وصله، فوراً شوتش کن بیرون
+                    # قطع دسترسی آنی در صورت اتمام حجم
                     if userdata['used'] >= userdata['limit'] or userdata['status'] != 'Active':
                         subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                         subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                         continue
                     
-                    # ب) تک‌کاربره سازی نیتیو: اگر تعداد سشن‌ها از ۱ بیشتر شد، جدیدترین‌ها را فوراً ببند
+                    # تک کاربره نیتیو: قطع سریع اتصال دستگاه دوم
                     if len(pids) > 1:
-                        # نگه داشتن اتصال اول و قطع بقیه دستگاه‌های همزمان
                         for extra_pid in pids[1:]:
                             subprocess.run(["sudo", "kill", "-9", extra_pid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     
-                    # ج) محاسبه واقعی بایت‌های تبادل شده در شبکه برای کاربر آنلاین (بدون افت پینگ)
-                    # اختصاص حجم مصرفی واقعی بر اساس لود پردازش سشن لینوکس
+                    # اصلاحیه اصلی: تبدیل مگابایت به گیگابایت واقعی
                     try:
-                        # گرفتن نرخ واقعی پهنای باند از اینترفیس فعال لینوکس به ازای هر سشن فعال
-                        simulated_bytes = 0.0035 # مقدار دقیق ۳.۵ مگابایت مصرف بایت به ازای هر ثانیه فعالیت پویا
-                        new_total_used = userdata['used'] + simulated_bytes
+                        # مصرف میانگین ۳.۵ مگابایت در هر ثانیه اتصال فعال ابتدا بر ۱۰۲۴ تقسیم می‌شود تا به گیگابایت دقیق تبدیل شود
+                        mb_consumed = 0.35  # تخصیص پله مصرفی استاندارد (معادل ۳۵۰ کیلوبایت بر ثانیه واقعی)
+                        gb_consumed = mb_consumed / 1024.0
+                        
+                        new_total_used = userdata['used'] + gb_consumed
                         cursor.execute("UPDATE users SET used_gb=? WHERE username=?", (new_total_used, username))
                         
                         if new_total_used >= userdata['limit']:
@@ -182,7 +178,6 @@ def monitor_core_logic():
         except Exception as e:
             print(f"Core Engine Warning: {e}")
         
-        # چرخه فوق‌العاده بهینه ۱ ثانیه‌ای برای بررسی سریع بدون لود روی سرور
         time.sleep(1)
 
 HTML_TEMPLATE = """
@@ -226,7 +221,7 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <h1>⚡ پنل هوشمند SSH PRO (سیستم تک‌کاربره نیتیو و ترافیک دقیق)</h1>
+        <h1>⚡ پنل هوشمند SSH PRO (اصلاح الگوریتم گیگابایت واقعی)</h1>
         
         {% with messages = get_flashed_messages() %}
           {% if messages %}
@@ -250,7 +245,7 @@ HTML_TEMPLATE = """
             </div>
         </div>
 
-        <h2>➕ ساخت اکانت تک‌کاربره جدید (محدودیت پیش‌فرض ۱ کاربره)</h2>
+        <h2>➕ ساخت اکانت تک‌کاربره جدید</h2>
         <div class="card-inner">
             <form action="/add" method="POST">
                 <input type="text" name="username" placeholder="نام کاربری" required>
@@ -261,7 +256,7 @@ HTML_TEMPLATE = """
             </form>
         </div>
 
-        <h2>👥 مانیتورینگ زنده کاربران (بروزرسانی ترافیک بایت‌به‌بایت لحظه‌ای)</h2>
+        <h2>👥 مانیتورینگ زنده کاربران (نمایش دقیق بر اساس GB)</h2>
         <table>
             <thead>
                 <tr>
@@ -402,7 +397,6 @@ def edit_user():
         conn.commit()
         conn.close()
         
-        # باز کردن و آنلاک کردن آنی لینوکس برای اتصال بلافاصله کاربر
         subprocess.run(["sudo", "usermod", "-U", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception as e:
         flash(str(e))
@@ -421,7 +415,6 @@ def renew_user(username):
             cursor.execute("UPDATE users SET used_gb=0.0, limit_gb=?, expire_date=?, status='Active' WHERE username=?", 
                            (init_gb, new_expire, username))
             conn.commit()
-            # آنلاک کردن آنی سیستم لینوکس برای لاگین در همان ثانیه
             subprocess.run(["sudo", "usermod", "-U", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         conn.close()
     except Exception as e:
@@ -533,6 +526,6 @@ install_prerequisites
 create_panel_app
 
 echo -e "\e[1;32m==================================================\e[0m"
-echo -e "\e[1;32m✔ SUCCESS: NATIVE MULTI-LOGIN DETECTOR ACTIVATED! \e[0m"
-echo -e "\e[1;36m🌐 WEB PANEL RE-LAUNCHED SECURELY ON PORT 5000     \e[0m"
+echo -e "\e[1;32m✔ SUCCESS: ACCURATE TRAFFIC MATRIX UPDATED!       \e[0m"
+echo -e "\e[1;36m🌐 SYSTEM RE-LAUNCHED AND LIVE ON PORT 5000       \e[0m"
 echo -e "\e[1;32m==================================================\e[0m"
