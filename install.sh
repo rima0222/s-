@@ -5,63 +5,27 @@ set -e
 
 clear
 echo "=================================================="
-echo "    SSH Tunnel + WEB GUI (Direct GOST WS Mode)    "
+echo "    SSH Tunnel + WEB GUI (PURE IPTABLES MODE)     "
 echo "=================================================="
 echo "Please select the role of this server:"
 echo "1) Server KHAREJ (Main + Custom Web GUI Panel)"
-echo "2) Server IRAN (Direct GOST WS Tunnel)"
+echo "2) Server IRAN (Pure IPtables Port Forward)"
 echo "=================================================="
 read -p "Enter your choice (1 or 2): " SERVER_ROLE
 
-# ۱. نصب پیش‌نیازها
-echo ""
-echo "[*] Updating system and installing prerequisites..."
-sudo apt update && sudo apt install -y curl wget unzip python3 python3-pip ufw bc python3-flask
-sleep 2
-
-# ۲. دانلود و نصب ابزار GOST
-if [ ! -f /usr/local/bin/gost ]; then
-    echo "[*] Installing GOST Tunneling Tool..."
-    wget https://github.com/ginuerzh/gost/releases/download/v2.11.5/gost-linux-amd64-2.11.5.gz
-    gunzip gost-linux-amd64-2.11.5.gz
-    chmod +x gost-linux-amd64-2.11.5
-    sudo mv gost-linux-amd64-2.11.5 /usr/local/bin/gost
-    sleep 2
-fi
-
-TUNNEL_PORT=8443
-LOCAL_SSH_PORT=22
-WS_PORT=80
 WEB_PANEL_PORT=5000
 
 # ==================================================
-# تنظیمات سرور خارج
+# تنظیمات سرور خارج (پنل وب گرافیکی)
 # ==================================================
 if [ "$SERVER_ROLE" == "1" ]; then
-    echo "[*] Configuring Server KHAREJ..."
+    echo "[*] Updating system and installing Flask..."
+    sudo apt update && sudo apt install -y python3 python3-pip python3-flask ufw
     
-    sudo ufw allow $TUNNEL_PORT/tcp comment 'GOST Tunnel'
     sudo ufw allow $WEB_PANEL_PORT/tcp comment 'Custom Web GUI'
+    sudo ufw allow 22/tcp comment 'SSH Port'
     sudo ufw reload
     
-    # ساخت سرویس GOST برای خارج (پذیرش وب‌ساکت مستقیم)
-    sudo tee /etc/systemd/system/gost-tunnel.service > /dev/null <<EOF
-[Unit]
-Description=Gost Tunnel Server on Kharej
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/gost -L mws://:$TUNNEL_PORT/127.0.0.1:$LOCAL_SSH_PORT
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-    sudo systemctl daemon-reload && sudo systemctl enable gost-tunnel.service && sudo systemctl start gost-tunnel.service
-
     echo "[*] Creating Custom Web GUI Panel..."
     sudo mkdir -p /etc/custom-panel
     sudo touch /etc/custom-panel/users.db
@@ -190,43 +154,38 @@ EOF
     
     echo "=================================================="
     echo "✔ Server KHAREJ Custom Panel Ready!"
+    echo "🌐 http://YOUR_KHAREJ_IP:5000"
     echo "=================================================="
 
 # ==================================================
-# تنظیمات سرور ایران (مستقیم با وب‌ساکت GOST)
+# تنظیمات سرور ایران (فوروارد مستقیم با IPtables)
 # ==================================================
 elif [ "$SERVER_ROLE" == "2" ]; then
-    echo "[*] Configuring Server IRAN..."
+    echo "[*] Configuring Server IRAN (Pure IPtables)..."
     read -p "Enter Server KHAREJ IP address: " KHAREJ_IP
     
-    # حذف سرویس قدیمی پایتون اگر وجود داشته باشد
-    sudo systemctl stop ssh-ws.service 2>/dev/null || true
-    sudo systemctl disable ssh-ws.service 2>/dev/null || true
-    sudo rm -f /etc/systemd/system/ssh-ws.service
+    # حذف گوست و سرویس‌های قبلی برای سبک‌سازی کامل سرور ایران
+    sudo systemctl stop gost-tunnel.service 2>/dev/null || true
+    sudo systemctl disable gost-tunnel.service 2>/dev/null || true
+    sudo rm -f /etc/systemd/system/gost-tunnel.service
     
-    sudo ufw allow $WS_PORT/tcp
-    sudo ufw reload
-
-    # ایجاد تونل مستقیم وب‌ساکت روی پورت ۸۰ ایران به خارج
-    sudo tee /etc/systemd/system/gost-tunnel.service > /dev/null <<EOF
-[Unit]
-Description=Gost Direct WS Tunnel on Iran
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/gost -L tcp://:$WS_PORT -F mws://$KHAREJ_IP:$TUNNEL_PORT?path=/ws
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    sudo systemctl daemon-reload
-    sudo systemctl enable gost-tunnel.service
-    sudo systemctl restart gost-tunnel.service
+    # فعال کردن فوروارد پکت‌ها در هسته لینوکس سرور ایران
+    sudo sysctl -w net.ipv4.ip_forward=1
+    echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf > /dev/null
     
+    # پاک کردن رول‌های قدیمی احتمالاً تداخلی
+    sudo iptables -t nat -F
+    
+    # دستور جادویی آینه‌ای کردن پورت ۸۰ ایران به پورت ۲۲ خارج
+    sudo iptables -t nat -A PREROUTING -p tcp --dport 80 -j DNAT --to-destination $KHAREJ_IP:22
+    sudo iptables -t nat -A POSTROUTING -p tcp -d $KHAREJ_IP --dport 22 -j MASQUERADE
+    
+    # نصب ابزار ذخیره دائمی رول‌های آی‌پی‌تیبلز تا با ریستارت سرور پاک نشوند
+    echo iptables-persistent iptables-persistent/autosave_v4 boolean true | sudo debconf-set-selections
+    echo iptables-persistent iptables-persistent/autosave_v6 boolean true | sudo debconf-set-selections
+    sudo apt install -y iptables-persistent
+
     echo "=================================================="
-    echo "✔ Server IRAN Ready (Direct WS Mode)!"
+    echo "✔ Server IRAN Port Forwarding via IPtables Ready!"
     echo "=================================================="
 fi
