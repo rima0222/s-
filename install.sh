@@ -4,22 +4,27 @@
 set -e
 
 clear
-echo "=================================================="
-echo "    SSH PRO PANEL (WEB-BASED BACKUP & RESTORE)    "
-echo "=================================================="
+echo -e "\e[1;34m==================================================\e[0m"
+echo -e "\e[1;36m    SSH PRO ADVANCED PANEL (DARK THEME & RECOVERY) \e[0m"
+echo -e "\e[1;34m==================================================\e[0m"
 echo "Please select an option:"
 echo "1) Fresh Install (نصب اولیه یا راه اندازی مجدد)"
 echo "2) Command-Line Restore (در صورتی که فایل دیتابیس را دارید)"
-echo "=================================================="
+echo -e "\e[1;34m==================================================\e[0m"
 read -p "Enter your choice (1 or 2): " MAIN_CHOICE
 
 DB_FILE="/etc/custom-panel/panel.db"
 WEB_PANEL_PORT=5000
 
 install_prerequisites() {
-    echo "[*] Installing system requirements..."
+    echo "[*] Fixing potential dpkg locks and installing openssh-server..."
+    # آزاد کردن قفل‌های احتمالی apt و dpkg
+    sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/cache/apt/archives/lock
+    sudo dpkg --configure -a
+    
     sudo apt update
-    sudo apt install -y python3 python3-pip python3-flask ufw sqlite3 bc
+    # نصب اجباری openssh-server برای رفع ارور عدم شناسایی sshd
+    sudo apt install -y openssh-server python3 python3-pip python3-flask ufw sqlite3 bc
     
     # تنظیم فایروال
     sudo ufw allow $WEB_PANEL_PORT/tcp comment 'Web Panel'
@@ -30,20 +35,24 @@ install_prerequisites() {
     # هماهنگ‌سازی پورت ۴۴۳ روی SSH سرور
     if ! grep -q "Port 443" /etc/ssh/sshd_config; then
         echo "Port 443" | sudo tee -a /etc/ssh/sshd_config > /dev/null
-        sudo systemctl restart sshd
     fi
+    
+    # اطمینان از فعال و زنده بودن سرویس SSH
+    sudo systemctl daemon-reload
+    sudo systemctl enable ssh
+    sudo systemctl restart ssh
     
     sudo mkdir -p /etc/custom-panel
 }
 
 create_panel_app() {
-    echo "[*] Creating Core Python Web GUI with Backup/Restore..."
+    echo "[*] Creating Core Python Web GUI with Professional Dark UI..."
     sudo tee /etc/custom-panel/app.py > /dev/null << 'EOF'
 import os, subprocess, datetime, sqlite3, json
-from flask import Flask, request, render_template_string, redirect, send_file, flash
+from flask import Flask, request, render_template_string, redirect, send_file
 
 app = Flask(__name__)
-app.secret_key = "ssh_pro_secret_key_secure"
+app.secret_key = "ssh_pro_premium_dark_key"
 DB_FILE = "/etc/custom-panel/panel.db"
 
 def init_db():
@@ -78,7 +87,7 @@ def update_traffic_and_limits():
     today = datetime.datetime.now().strftime("%Y-%m-%d")
     online_list = get_online_users()
     
-    # قفل هوشمند تک‌کاربره (قطع اتصال نفر دوم)
+    # قفل هوشمند و اجباری تک‌کاربره
     for user in set(online_list):
         if user:
             try:
@@ -108,94 +117,155 @@ HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="fa" dir="rtl">
 <head>
-    <meta charset="UTF-8"><title>پنل مدیریت کاربران SSH PRO</title>
+    <meta charset="UTF-8">
+    <title>⚡ SSH PRO PANEL - PREMIUM DARK ⚡</title>
     <style>
-        body { font-family: Tahoma, Arial; background-color: #f4f6f9; margin: 20px; direction: rtl; }
-        .container { max-width: 1200px; background: white; padding: 25px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.08); margin: auto; }
-        h2 { border-bottom: 2px solid #007bff; padding-bottom: 10px; color: #007bff; margin-top: 30px; }
-        .flex-box { display: flex; gap: 15px; flex-wrap: wrap; margin-bottom: 20px; }
-        form.add-form { display: flex; gap: 10px; flex-wrap: wrap; background: #f8f9fa; padding: 15px; border-radius: 6px; width: 100%; border: 1px solid #e2e8f0; }
-        input, select { padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 4px; flex: 1; min-width: 140px; }
-        button { padding: 8px 16px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
-        button.btn-success { background: #28a745; }
-        button.btn-danger { background: #dc3545; }
-        button.btn-warning { background: #ffc107; color: #212529; }
-        .backup-section { background: #e2e8f0; padding: 15px; border-radius: 6px; display: flex; gap: 20px; align-items: center; width: 100%; margin-bottom: 20px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
-        th, td { border: 1px solid #e2e8f0; padding: 12px; text-align: center; }
-        th { background-color: #f1f5f9; color: #334155; }
-        .badge { padding: 4px 8px; border-radius: 4px; color: white; font-size: 12px; font-weight: bold; }
-        .online { background: #28a745; } .offline { background: #94a3b8; }
-        .alert { padding: 10px; background: #d4edda; color: #155724; border-radius: 4px; margin-bottom: 15px; text-align: center; }
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --accent-blue: #3b82f6;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --accent-yellow: #f59e0b;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border-color: #334155;
+        }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Arial; 
+            background-color: var(--bg-color); 
+            color: var(--text-main);
+            margin: 0; padding: 30px; 
+            direction: rtl; 
+        }
+        .container { 
+            max-width: 1250px; 
+            background: var(--card-bg); 
+            padding: 30px; 
+            border-radius: 12px; 
+            box-shadow: 0 10px 25px rgba(0,0,0,0.4); 
+            margin: auto;
+            border: 1px solid var(--border-color);
+        }
+        h1 { font-size: 26px; color: var(--text-main); display: flex; align-items: center; gap: 10px; margin-bottom: 25px; }
+        h2 { font-size: 18px; color: var(--accent-blue); margin-top: 35px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; }
+        
+        .grid-header { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 25px; }
+        .card-inner { background: #111827; padding: 20px; border-radius: 8px; border: 1px solid var(--border-color); }
+        
+        form { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+        input, select { 
+            background: #111827; color: var(--text-main); 
+            border: 1px solid var(--border-color); padding: 10px 14px; 
+            border-radius: 6px; flex: 1; min-width: 150px; transition: 0.2s;
+        }
+        input:focus { border-color: var(--accent-blue); outline: none; }
+        
+        button { 
+            padding: 10px 20px; color: white; border: none; 
+            border-radius: 6px; cursor: pointer; font-weight: 600; transition: 0.2s; 
+        }
+        button:hover { filter: brightness(1.2); }
+        .btn-blue { background: var(--accent-blue); }
+        .btn-green { background: var(--accent-green); }
+        .btn-red { background: var(--accent-red); }
+        .btn-yellow { background: var(--accent-yellow); color: #000; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: #111827; border-radius: 8px; overflow: hidden; }
+        th, td { border: 1px solid var(--border-color); padding: 14px; text-align: center; }
+        th { background-color: #1e293b; color: var(--text-muted); font-weight: 600; }
+        tr:hover { background-color: #1e293b; }
+        
+        .badge { padding: 5px 10px; border-radius: 5px; font-size: 12px; font-weight: bold; display: inline-block; }
+        .online { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid #10b981; }
+        .offline { background: rgba(148, 163, 184, 0.2); color: #cbd5e1; border: 1px solid #94a3b8; }
+        .status-active { color: #34d399; }
+        .status-expired { color: #f87171; }
+        .status-limit { color: #fbbf24; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>⚙️ پنل مدیریت هوشمند SSH PRO</h1>
+        <h1>⚡ پنل مدیریت هوشمند و پیشرفته SSH PRO</h1>
         
-        <h2>💾 پشتیبان‌گیری و بازگردانی سریع (Backup & Restore)</h2>
-        <div class="backup-section">
-            <div>
-                <a href="/backup/download"><button class="btn-success">📥 دانلود فایل بک‌آپ پنل</button></a>
+        <div class="grid-header">
+            <div class="card-inner">
+                <h3 style="margin-top:0; color:var(--accent-green);">📥 پشتیبان‌گیری دیتابیس</h3>
+                <p style="color:var(--text-muted); font-size:13px;">دانلود آنی ساختار کامل کاربران، حجم و زمان باقی‌مانده.</p>
+                <a href="/backup/download"><button class="btn-green" style="width:100%;">دانلود فایل بک‌آپ پنل (.json)</button></a>
             </div>
-            <div style="border-right: 2px solid #cbd5e1; padding-right: 20px;">
-                <form action="/backup/restore" method="POST" enctype="multipart/form-data" style="display: flex; gap: 10px; margin: 0; padding: 0;">
-                    <label style="font-weight: bold; margin-top: 5px;">📤 بازگردانی فایل بک‌آپ:</label>
-                    <input type="file" name="backup_file" accept=".json" required style="background: white; min-width: auto;">
-                    <button type="submit" class="btn-danger">شروع عملیات ریستور</button>
+            <div class="card-inner">
+                <h3 style="margin-top:0; color:var(--accent-red);">📤 بازگردانی دیتابیس</h3>
+                <form action="/backup/restore" method="POST" enctype="multipart/form-data" style="flex-direction: column; align-items: stretch; gap: 8px;">
+                    <input type="file" name="backup_file" accept=".json" required style="padding:6px;">
+                    <button type="submit" class="btn-red">شروع عملیات ریستور بر روی سرور جدید</button>
                 </form>
             </div>
         </div>
 
-        <h2>➕ ساخت کاربر جدید</h2>
-        <form action="/add" method="POST" class="add-form">
-            <input type="text" name="username" placeholder="نام کاربری" required>
-            <input type="text" name="password" placeholder="کلمه عبور" required>
-            <input type="number" step="0.1" name="limit_gb" placeholder="حجم مجاز (GB)" required>
-            <input type="number" name="days" placeholder="مدت اعتبار (روز)" required>
-            <button type="submit">ایجاد اکانت</button>
-        </form>
+        <h2>➕ ساخت اکانت تک‌کاربره جدید</h2>
+        <div class="card-inner">
+            <form action="/add" method="POST">
+                <input type="text" name="username" placeholder="نام کاربری" required>
+                <input type="text" name="password" placeholder="کلمه عبور" required>
+                <input type="number" step="0.1" name="limit_gb" placeholder="حجم مجاز (GB)" required>
+                <input type="number" name="days" placeholder="مدت اعتبار (روز)" required>
+                <button type="submit" class="btn-blue">ایجاد کاربر جدید</button>
+            </form>
+        </div>
 
-        <h2>👥 لیست کاربران فعال و وضعیت منابع</h2>
+        <h2>👥 مانیتورینگ منابع و اتصال کاربران زنده</h2>
         <table>
-            <tr>
-                <th>نام کاربری</th>
-                <th>کلمه عبور</th>
-                <th>حجم کل</th>
-                <th>حجم مصرفی</th>
-                <th>تاریخ انقضا</th>
-                <th>وضعیت اتصال</th>
-                <th>وضعیت اکانت</th>
-                <th>عملیات مدیریت</th>
-            </tr>
-            {% for user in users %}
-            <tr>
-                <td>{{ user[0] }}</td>
-                <td>{{ user[1] }}</td>
-                <td>{{ user[2] }} GB</td>
-                <td>{{ "%.2f"|format(user[3]) }} GB</td>
-                <td>{{ user[4] }}</td>
-                <td>
-                    {% if user[0] in online_users %}
-                    <span class="badge online">آنلاین</span>
-                    {% else %}
-                    <span class="badge offline">آفلاین</span>
-                    {% endif %}
-                </td>
-                <td>{{ user[5] }}</td>
-                <td>
-                    <form action="/edit" method="POST" style="display:inline; padding:0; margin:0;">
-                        <input type="hidden" name="username" value="{{ user[0] }}">
-                        <input type="number" step="0.1" name="limit_gb" value="{{ user[2] }}" style="width:65px; min-width:auto; padding:2px;">
-                        <input type="text" name="expire_date" value="{{ user[4] }}" style="width:95px; min-width:auto; padding:2px;">
-                        <button type="submit" class="btn-warning" style="padding:3px 8px; font-size:12px;">ویرایش</button>
-                    </form>
-                    
-                    <a href="/reset/{{ user[0] }}"><button class="btn-success" style="padding:3px 8px; font-size:12px;">ریست مصرف</button></a>
-                    <a href="/delete/{{ user[0] }}"><button class="btn-danger" style="padding:3px 8px; font-size:12px;">حذف</button></a>
-                </td>
-            </tr>
-            {% endfor %}
+            <thead>
+                <tr>
+                    <th>نام کاربری</th>
+                    <th>کلمه عبور</th>
+                    <th>حجم کل</th>
+                    <th>حجم مصرفی</th>
+                    <th>تاریخ انقضا</th>
+                    <th>وضعیت اتصال</th>
+                    <th>وضعیت سیستم</th>
+                    <th>عملیات ویرایش و مدیریت سریع</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                <tr>
+                    <td style="font-weight:bold; color:var(--accent-blue);">{{ user[0] }}</td>
+                    <td><code>{{ user[1] }}</code></td>
+                    <td>{{ user[2] }} GB</td>
+                    <td><span style="color:#38bdf8;">{{ "%.2f"|format(user[3]) }}</span> GB</td>
+                    <td>{{ user[4] }}</td>
+                    <td>
+                        {% if user[0] in online_users %}
+                        <span class="badge online">● آنلاین</span>
+                        {% else %}
+                        <span class="badge offline">○ آفلاین</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if user[5] == 'Active' %}
+                        <span class="status-active">✔ فعال</span>
+                        {% elif user[5] == 'Expired' %}
+                        <span class="status-expired">❌ منقضی شده</span>
+                        {% else %}
+                        <span class="status-limit">⚠️ پایان حجم</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <form action="/edit" method="POST" style="display:inline-flex; gap:5px; background:none; padding:0;">
+                            <input type="hidden" name="username" value="{{ user[0] }}">
+                            <input type="number" step="0.1" name="limit_gb" value="{{ user[2] }}" style="width:60px; min-width:auto; padding:4px; font-size:12px;">
+                            <input type="text" name="expire_date" value="{{ user[4] }}" style="width:90px; min-width:auto; padding:4px; font-size:12px;">
+                            <button type="submit" class="btn-yellow" style="padding:4px 8px; font-size:12px;">ویرایش</button>
+                        </form>
+                        
+                        <a href="/reset/{{ user[0] }}" style="text-decoration:none;"><button class="btn-green" style="padding:4px 8px; font-size:12px;">ریست</button></a>
+                        <a href="/delete/{{ user[0] }}" style="text-decoration:none;"><button class="btn-red" style="padding:4px 8px; font-size:12px;">حذف</button></a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
         </table>
     </div>
 </body>
@@ -268,7 +338,6 @@ def delete_user(username):
     conn.close()
     return redirect('/')
 
-# دانلود فایل بک آپ به صورت فرمت خوانای JSON
 @app.route('/backup/download')
 def download_backup():
     conn = sqlite3.connect(DB_FILE)
@@ -284,13 +353,12 @@ def download_backup():
             "used_gb": row[3], "expire_date": row[4], "status": row[5]
         })
         
-    backup_filename = f"/tmp/ssh_backup_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    backup_filename = f"/tmp/ssh_backup.json"
     with open(backup_filename, "w") as f:
         json.dump(backup_data, f, indent=4)
         
-    return send_file(backup_filename, as_attachment=True, download_name="ssh_panel_backup.json")
+    return send_file(backup_filename, as_attachment=True, download_name="ssh_premium_backup.json")
 
-# آپلود و ساخت آنی کاربران از روی فایل JSON بک آپ
 @app.route('/backup/restore', methods=['POST'])
 def restore_backup():
     if 'backup_file' not in request.files:
@@ -312,13 +380,11 @@ def restore_backup():
             expire_date = item['expire_date']
             status = item['status']
             
-            # ساخت مجدد کاربر در لینوکس جدید
             subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True)
             if status != 'Active':
                 subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
-            # درج یا بروزرسانی در دیتابیس نوپا
             cursor.execute('''
                 INSERT OR REPLACE INTO users (username, password, limit_gb, used_gb, expire_date, status)
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -335,7 +401,7 @@ EOF
 
     sudo tee /etc/systemd/system/custom-panel.service > /dev/null <<EOF
 [Unit]
-Description=SSH Advanced GUI Pro Panel
+Description=SSH Advanced GUI Dark Panel
 After=network.target
 
 [Service]
@@ -355,14 +421,11 @@ EOF
 if [ "$MAIN_CHOICE" == "1" ]; then
     install_prerequisites
     create_panel_app
-    echo "=================================================="
-    echo "✔ PRO SSH Panel with Web Backup Installed!"
-    echo "🌐 Web Interface: http://YOUR_SERVER_IP:5000"
-    echo "📱 Client Port: 443"
-    echo "=================================================="
-
+    echo -e "\e[1;32m==================================================\e[0m"
+    echo -e "\e[1;32m✔ SUCCESS: SSH PRO PREMIUM DARK PANEL INSTALLED! \e[0m"
+    echo -e "\e[1;36m🌐 Dark Interface URL: http://YOUR_SERVER_IP:5000 \e[0m"
+    echo -e "\e[1;32m==================================================\e[0m"
 elif [ "$MAIN_CHOICE" == "2" ]; then
     install_prerequisites
-    echo "[!] Please use Web GUI on port 5000 to upload json backup easily."
     create_panel_app
 fi
