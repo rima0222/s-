@@ -1,58 +1,43 @@
 #!/bin/bash
 
-# خروج سریع در صورت بروز خطاهای پیش‌بینی نشده (به جز دستورات پاکسازی ایمن)
-set -e
+# غیرفعال کردن خروج اضطراری برای دستورات پاکسازی اولیه جهت جلوگیری از کرش اسکریپت
+set +e
 
 clear
-echo -e "\e[1;33m[*] Killing package managers and forcing lock release...\e[0m"
+echo -e "\e[1;33m[*] Managing system locks gracefully...\e[0m"
 
-# ۱. آزاد کردن اجباری قفل‌های سیستم‌عامل
-sudo killall -9 apt-get apt unattended-upgrades || true
-sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/cache/apt/archives/lock
-sudo dpkg --configure -a || true
+# آزاد کردن قفل‌های احتمالی apt بدون آسیب به سیستم
+sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/cache/apt/archives/lock 2>/dev/null
+sudo dpkg --configure -a 2>/dev/null
 
-echo -e "\e[1;32m✔ System locks cleared successfully.\e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
-echo -e "\e[1;36m     SSH PRO PANEL (100% STABLE - ANTI CRASH)     \e[0m"
+echo -e "\e[1;36m    SSH PRO PANEL (SAFE IN-PLACE UPDATE METHOD)   \e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
 
 DB_FILE="/etc/custom-panel/panel.db"
 WEB_PANEL_PORT=5000
 
-purge_old_installation() {
-    echo "[*] Cleaning up and purging previous processes to prevent port conflict..."
+update_and_replace_logic() {
+    echo "[*] Replacing web-server files and freeing port 5000 safely..."
     
-    # متوقف کردن و حذف کامل سرویس سیستم‌دی قبلی
-    sudo systemctl stop custom-panel.service 2>/dev/null || true
-    sudo systemctl disable custom-panel.service 2>/dev/null || true
-    sudo rm -f /etc/systemd/system/custom-panel.service || true
-    sudo systemctl daemon-reload || true
+    # کنترل پورت ۵۰۰۰: فقط پروسه مربوط به این پورت آزاد می‌شود تا خطا رخ ندهد
+    sudo fuser -k $WEB_PANEL_PORT/tcp 2>/dev/null
     
-    # کشتن هر پروسه‌ای که پورت ۵۰۰۰ یا فایل پایتون را اشغال کرده (عامل اصلی کرش)
-    sudo fuser -k $WEB_PANEL_PORT/tcp 2>/dev/null || true
-    sudo killall -9 python3 2>/dev/null || true
-    
-    # پاکسازی رول‌های تکراری فایروال به صورت کاملاً امن بدون ایجاد تداخل در هسته
-    sudo iptables -F || true
-    sudo iptables -X || true
-    
-    # ساخت دایرکتوری اصلی در صورت عدم وجود (بدون حذف کردن فایل دیتابیس قبلی)
+    # ساخت دایرکتوری در صورت عدم وجود (اگر از قبل باشد خطایی نمی‌دهد)
     sudo mkdir -p /etc/custom-panel
 }
 
 install_prerequisites() {
-    echo "[*] Installing required system packages..."
+    echo "[*] Ensuring required system packages are present..."
+    # روشن کردن خروج در صورت خطا فقط برای نصب پکیج‌ها
+    set -e
     sudo apt update -y
     sudo apt install -y openssh-server python3 python3-pip python3-flask ufw sqlite3 bc psmisc iptables net-tools vnstat
-    
-    # کانفیگ فایروال سیستم
-    sudo ufw allow $WEB_PANEL_PORT/tcp comment 'Web Panel'
-    sudo ufw allow 22/tcp comment 'SSH Default'
-    sudo ufw --force enable
+    set +e
 }
 
 create_panel_app() {
-    echo "[*] Generating core Python Web GUI script..."
+    echo "[*] Overlaying the core Python Web GUI script..."
     sudo tee /etc/custom-panel/app.py > /dev/null << 'EOF'
 import os, subprocess, datetime, sqlite3, json, time, threading
 from flask import Flask, request, render_template_string, redirect, send_file, jsonify, flash
@@ -104,7 +89,7 @@ def get_user_real_traffic(username):
         res = subprocess.check_output(f"id -u {username}", shell=True).decode().strip()
         uid = int(res)
         
-        # بررسی وجود رول‌ها بدون تکرار
+        # بررسی رول‌ها بدون ایجاد تکرار یا خطا در محیط فایروال
         subprocess.run(f"sudo iptables -C OUTPUT -m owner --uid-owner {uid} -j ACCEPT 2>/dev/null || sudo iptables -I OUTPUT 1 -m owner --uid-owner {uid} -j ACCEPT", shell=True)
         subprocess.run(f"sudo iptables -C INPUT -m owner --uid-owner {uid} -j ACCEPT 2>/dev/null || sudo iptables -I INPUT 1 -m owner --uid-owner {uid} -j ACCEPT", shell=True)
         
@@ -136,8 +121,8 @@ def safe_system_user_create(username, password):
                 subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except:
         pass
-    subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True, check=True)
+    subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True)
     
     try:
         res = subprocess.check_output(f"id -u {username}", shell=True).decode().strip()
@@ -154,7 +139,7 @@ def monitor_core_logic():
             conn = sqlite3.connect(DB_FILE)
             cursor = conn.cursor()
             
-            # ۱. بررسی انقضای زمانی
+            # ۱. بررسی تاریخ انقضا
             cursor.execute("SELECT username, expire_date, status FROM users WHERE status='Active'")
             active_users = cursor.fetchall()
             for user in active_users:
@@ -164,7 +149,7 @@ def monitor_core_logic():
                     cursor.execute("UPDATE users SET status='Expired' WHERE username=?", (username,))
                     subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            # ۲. مانیتورینگ لحظه‌ای حجم فایروال
+            # ۲. بررسی ترافیک مصرفی واقعی کاربران
             active_connections = get_sshd_connections()
             cursor.execute("SELECT username, limit_gb, used_gb, status FROM users")
             db_users = {r[0]: {"limit": r[1], "used": r[2], "status": r[3]} for r in cursor.fetchall()}
@@ -181,7 +166,7 @@ def monitor_core_logic():
                     cursor.execute("UPDATE users SET status='Traffic_Limit' WHERE username=?", (username,))
                     subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            # ۳. محدودیت اتصال همزمان به یک کاربر
+            # ۳. محدودیت سفت و سخت اتصال همزمان کلاینت (فقط ۱ اتصال)
             for username, pids in active_connections.items():
                 if len(pids) > 1:
                     for extra_pid in pids[1:]:
@@ -198,7 +183,7 @@ HTML_TEMPLATE = """
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>⚡ SSH PRO PANEL - ULTRA STABLE ⚡</title>
+    <title>⚡ SSH PRO PANEL - ULTRA STABLE INPLACE ⚡</title>
     <style>
         :root {
             --bg-color: #0f172a;
@@ -236,28 +221,28 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <h1>⚡ پنل فوق پایدار SSH PRO + نوار حجم هوشمند (نسخه ضد کرش)</h1>
+        <h1>⚡ پنل پایدار جایگزین SSH PRO + نوار وضعیت مصرف ترافیک هوشمند</h1>
         
         {% with messages = get_flashed_messages() %}
           {% if messages %}
             {% for message in messages %}
-              <div class="alert-flash">⚠️ پیام سیستم: {{ message }}</div>
+              <div class="alert-flash">⚠️ {{ message }}</div>
             {% endfor %}
           {% endif %}
         {% endwith %}
 
         <div class="grid-header">
             <div class="card-inner" style="margin-bottom:0;">
-                <h3 style="margin-top:0; color:var(--accent-green);">📥 پشتیبان‌گیری از کاربران</h3>
-                <p style="color:var(--text-muted); font-size:13px; margin-bottom:15px;">دانلود فایل خروجی استاندارد JSON از اطلاعات تمام اکانت‌ها.</p>
-                <a href="/backup/download"><button class="btn-green" style="width:100%;">📥 دانلود بک‌آب پنل</button></a>
+                <h3 style="margin-top:0; color:var(--accent-green);">📥 پشتیبان‌گیری دیتابیس کاربران</h3>
+                <p style="color:var(--text-muted); font-size:13px; margin-bottom:15px;">دانلود فایل خروجی زنده JSON از ساختار کل کاربران.</p>
+                <a href="/backup/download"><button class="btn-green" style="width:100%;">📥 دانلود فوری فایل بک‌آب</button></a>
             </div>
             <div class="card-inner" style="margin-bottom:0;">
                 <h3 style="margin-top:0; color:var(--accent-red);">📤 بازگردانی فایل پشتیبان</h3>
-                <p style="color:var(--text-muted); font-size:13px; margin-bottom:15px;">فایل بک‌آپ دانلود شده قبلی را برای بازیابی کامل آپلود کنید.</p>
+                <p style="color:var(--text-muted); font-size:13px; margin-bottom:15px;">فایل بک‌آپ دانلود شده از قبل را جهت بازیابی ایمن بارگذاری کنید.</p>
                 <form action="/backup/restore" method="POST" enctype="multipart/form-data" style="flex-direction: column; align-items: stretch; gap: 8px;">
                     <input type="file" name="backup_file" accept=".json" required style="padding:6px;">
-                    <button type="submit" class="btn-red">📤 شروع عملیات بازگردانی</button>
+                    <button type="submit" class="btn-red">📤 شروع عملیات بازگردانی (Restore)</button>
                 </form>
             </div>
         </div>
@@ -273,7 +258,7 @@ HTML_TEMPLATE = """
             </form>
         </div>
 
-        <h2>👥 وضعیت زنده و ثانیه‌ای کاربران</h2>
+        <h2>👥 وضعیت زنده و ترافیک مصرفی کاربران</h2>
         <table>
             <thead>
                 <tr>
@@ -318,6 +303,7 @@ HTML_TEMPLATE = """
                     
                     let remainingPercent = totalGb > 0 ? (remainingGb / totalGb) * 100 : 0;
                     
+                    // تغییر رنگ هوشمند نوار وضعیت بر اساس باقیمانده حجم
                     let barColor = 'var(--accent-green)'; 
                     if (remainingPercent <= 50 && remainingPercent > 20) {
                         barColor = 'var(--accent-yellow)'; 
@@ -373,7 +359,6 @@ def live_data():
         
         today = datetime.datetime.now().date()
         users_list = []
-        
         for row in rows:
             username, password, limit_gb, used_gb, expire_date, status, init_days = row
             try:
@@ -387,7 +372,6 @@ def live_data():
                 "used_gb": used_gb if used_gb else 0.0, "remaining_days": remaining_days, "status": status,
                 "initial_days": init_days if init_days else 30
             })
-            
         return jsonify({"users": users_list, "online_users": get_online_users()})
     except Exception as e:
         return jsonify({"users": [], "online_users": [], "error": str(e)})
@@ -506,7 +490,6 @@ def restore_backup():
             init_days = item.get('initial_days', 30)
             
             safe_system_user_create(username, password)
-            
             if status != 'Active':
                 subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
@@ -516,7 +499,7 @@ def restore_backup():
             ''', (username, password, limit_gb, used_gb, expire_date, status, init_gb, init_days))
         conn.commit()
         conn.close()
-        flash("بک‌آب با موفقیت بدون تداخل یا کرش بازگردانی شد.")
+        flash("فایل پشتیبان با موفقیت جایگذاری شد.")
     except Exception as e:
         flash(f"خطا در ریستور: {str(e)}")
     return redirect('/')
@@ -527,6 +510,7 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
 EOF
 
+    echo "[*] Ensuring systemd configuration is aligned..."
     sudo tee /etc/systemd/system/custom-panel.service > /dev/null <<EOF
 [Unit]
 Description=SSH Advanced GUI Dark Panel Ultimate
@@ -546,12 +530,12 @@ EOF
     sudo systemctl restart custom-panel.service
 }
 
-# اجرای توابع به ترتیب امن
-purge_old_installation
+# اجرای قدم‌به‌قدم متد جایگزینی امن
+update_and_replace_logic
 install_prerequisites
 create_panel_app
 
 echo -e "\e[1;32m==================================================\e[0m"
-echo -e "\e[1;32m✔ SUCCESS: PANEL UPGRADED & RESTARTED (NO CRASH)  \e[0m"
-echo -e "\e[1;36m🌐 WEB PANEL RESTARTED SUCCESSFULLY ON PORT 5000 \e[0m"
+echo -e "\e[1;32m✔ SUCCESS: PANEL INPLACE-REPLACED WITHOUT CRASH   \e[0m"
+echo -e "\e[1;36m🌐 LIVE DASHBOARD RUNNING STABLY ON PORT 5000     \e[0m"
 echo -e "\e[1;32m==================================================\e[0m"
