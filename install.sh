@@ -13,7 +13,7 @@ sudo dpkg --configure -a || true
 
 echo -e "\e[1;32m✔ System locks cleared successfully.\e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
-echo -e "\e[1;36m    SSH PRO PANEL (ANTI-LOCK & TOTAL PURGE V3)   \e[0m"
+echo -e "\e[1;36m    SSH PRO PANEL (ANTI-CRASH & OPTIMIZED V4)    \e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
 
 # ۲. ایجاد مکث ۳ ثانیه‌ای به صورت شمارش معکوس زنده
@@ -97,6 +97,19 @@ def get_online_users():
     except:
         return []
 
+def safe_system_user_create(username, password):
+    # حل ارور وضعیت ۹ لینوکس: اگر کاربر از قبل در لینوکس وجود داشت ابتدا آن را کاملاً حذف کن
+    try:
+        with open('/etc/passwd', 'r') as f:
+            if username in f.read():
+                subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except:
+        pass
+    
+    # ساخت بدون مشکل کاربر
+    subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True, check=True)
+
 def background_monitor():
     while True:
         try:
@@ -108,6 +121,7 @@ def background_monitor():
             today = datetime.datetime.now().strftime("%Y-%m-%d")
             online_list = get_online_users()
 
+            # مدیریت اتصال همزمان (تک کاربره)
             for user in set(online_list):
                 if user:
                     try:
@@ -137,7 +151,8 @@ def background_monitor():
         except Exception as e:
             print(f"Monitor Warning: {e}")
         
-        time.sleep(15)
+        # بهینه‌سازی شده از ۱۵ به ۶۰ ثانیه برای جلوگیری از قطع شدن سرور و کاهش ترافیک پردازنده
+        time.sleep(60)
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -180,7 +195,7 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <h1>⚡ پنل مدیریت هوشمند SSH PRO (نسخه کاملاً خودکار و مستقل)</h1>
+        <h1>⚡ پنل مدیریت هوشمند SSH PRO (نسخه ضد کرش و بهینه شده)</h1>
         
         {% with messages = get_flashed_messages() %}
           {% if messages %}
@@ -329,8 +344,8 @@ def add_user():
         days = int(request.form['days'].strip())
         expire_date = (datetime.datetime.now() + datetime.timedelta(days=days)).strftime("%Y-%m-%d")
         
-        subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True, check=True)
+        # استفاده از متد ساخت امن لینوکس جدید بدون تداخل وضعیت ۹
+        safe_system_user_create(username, password)
         
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
@@ -436,7 +451,12 @@ def restore_backup():
             init_gb = item.get('initial_gb', limit_gb)
             init_days = item.get('initial_days', 30)
             
-            subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # پاکسازی کامل تداخل های سیستمی قبل از ریستور
+            try:
+                subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except:
+                pass
+                
             subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True, check=True)
             if status != 'Active':
