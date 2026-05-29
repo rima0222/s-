@@ -11,7 +11,7 @@ sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/loc
 sudo dpkg --configure -a 2>/dev/null
 
 echo -e "\e[1;34m==================================================\e[0m"
-echo -e "\e[1;36m     SSH PRO PANEL (CALIBRATED ACCURATE TRAFFIC)   \e[0m"
+echo -e "\e[1;36m      SSH PRO PANEL (CALIBRATED ACCURATE TRAFFIC)   \e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
 
 DB_FILE="/etc/custom-panel/panel.db"
@@ -34,7 +34,7 @@ install_prerequisites() {
 create_panel_app() {
     echo "[*] Injecting Updated iOS Glassmorphism Web Panel..."
     sudo tee /etc/custom-panel/app.py > /dev/null << 'EOF'
-import os, subprocess, datetime, sqlite3, json, time, threading
+import os, subprocess, datetime, sqlite3, json, time, threading, pwd
 from flask import Flask, request, render_template_string, redirect, send_file, jsonify, flash
 
 app = Flask(__name__)
@@ -42,23 +42,32 @@ app.secret_key = "ssh_pro_glass_premium_key_v4"
 DB_FILE = "/etc/custom-panel/panel.db"
 TRAFFIC_TRACKER = {}
 
+# تعریف یک Lock برای جلوگیری از تداخل ریسمان‌ها در دیتابیس
+db_lock = threading.Lock()
+
+def get_db_connection():
+    conn = sqlite3.connect(DB_FILE, timeout=30.0, check_same_thread=False)
+    conn.execute('PRAGMA journal_mode=WAL;')  # افزایش سرعت و پایداری نوشتن همزمان
+    return conn
+
 def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            username TEXT PRIMARY KEY,
-            password TEXT,
-            limit_gb REAL,
-            used_gb REAL DEFAULT 0.0,
-            expire_date TEXT,
-            status TEXT DEFAULT 'Active',
-            initial_gb REAL,
-            initial_days INTEGER
-        )
-    ''')
-    conn.commit()
-    conn.close()
+    with db_lock:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY,
+                password TEXT,
+                limit_gb REAL,
+                used_gb REAL DEFAULT 0.0,
+                expire_date TEXT,
+                status TEXT DEFAULT 'Active',
+                initial_gb REAL,
+                initial_days INTEGER
+            )
+        ''')
+        conn.commit()
+        conn.close()
 
 def get_sshd_connections():
     connections = {}
@@ -81,89 +90,86 @@ def get_online_users():
     return list(get_sshd_connections().keys())
 
 def update_traffic_from_proc():
-    """موتور مانیتورینگ ترافیک کالیبره شده و دقیق‌شده با حجم مصرفی واقعی گوشی"""
     global TRAFFIC_TRACKER
     while True:
         try:
             active_connections = get_sshd_connections()
-            conn = sqlite3.connect(DB_FILE)
-            cursor = conn.cursor()
-            
-            for username, pids in active_connections.items():
-                for pid in pids:
-                    net_file = f"/proc/{pid}/net/dev"
-                    if os.path.exists(net_file):
-                        try:
-                            with open(net_file, "r") as f:
-                                lines = f.readlines()
-                            bytes_sum = 0
-                            for line in lines:
-                                if ":" in line:
-                                    parts = line.split()
-                                    # جمع بایت‌های ورودی و خروجی سوکت
-                                    bytes_sum += int(parts[1]) + int(parts[9])
-                            
-                            if username not in TRAFFIC_TRACKER:
-                                TRAFFIC_TRACKER[username] = {"last_bytes": bytes_sum}
-                                continue
-                            
-                            diff = bytes_sum - TRAFFIC_TRACKER[username]["last_bytes"]
-                            if diff > 0:
-                                # اعمال ضریب کالیبراسیون (0.68) جهت حذف سربار پروتکل SSH/TCP Encapsulation
-                                # این ضریب باعث می‌شود حجم مانیتور شده کاملاً با کانکشن گوشی همسان شود.
-                                calibrated_bytes = diff * 0.68
-                                diff_gb = calibrated_bytes / (1024.0 * 1024.0 * 1024.0)
-                                
-                                # بروزرسانی مستقیم دیتابیس با دقت بالا
-                                cursor.execute("UPDATE users SET used_gb = used_gb + ? WHERE username = ?", (diff_gb, username))
-                            
-                            TRAFFIC_TRACKER[username]["last_bytes"] = bytes_sum
-                        except:
-                            pass
-            conn.commit()
-            conn.close()
-        except:
-            pass
+            if active_connections:
+                with db_lock:
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    
+                    for username, pids in active_connections.items():
+                        for pid in pids:
+                            net_file = f"/proc/{pid}/net/dev"
+                            if os.path.exists(net_file):
+                                try:
+                                    with open(net_file, "r") as f:
+                                        lines = f.readlines()
+                                    bytes_sum = 0
+                                    for line in lines:
+                                        if ":" in line:
+                                            parts = line.split()
+                                            bytes_sum += int(parts[1]) + int(parts[9])
+                                    
+                                    if username not in TRAFFIC_TRACKER:
+                                        TRAFFIC_TRACKER[username] = {"last_bytes": bytes_sum}
+                                        continue
+                                    
+                                    diff = bytes_sum - TRAFFIC_TRACKER[username]["last_bytes"]
+                                    if diff > 0:
+                                        calibrated_bytes = diff * 0.68
+                                        diff_gb = calibrated_bytes / (1024.0 * 1024.0 * 1024.0)
+                                        cursor.execute("UPDATE users SET used_gb = used_gb + ? WHERE username = ?", (diff_gb, username))
+                                    
+                                    TRAFFIC_TRACKER[username]["last_bytes"] = bytes_sum
+                                except:
+                                    pass
+                    conn.commit()
+                    conn.close()
+        except Exception as e:
+            print(f"Error in traffic monitoring: {e}")
         time.sleep(2)
 
 def monitor_core_logic():
     while True:
         try:
             today = datetime.datetime.now().strftime("%Y-%m-%d")
-            conn = sqlite3.connect(DB_FILE)
-            cursor = conn.cursor()
-            
-            # ۱. بررسی تاریخ انقضا
-            cursor.execute("SELECT username, expire_date, status FROM users WHERE status='Active'")
-            active_users = cursor.fetchall()
-            for user in active_users:
-                username, expire_date, status = user
-                if expire_date and expire_date < today:
-                    subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    cursor.execute("UPDATE users SET status='Expired' WHERE username=?", (username,))
-                    subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            with db_lock:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                
+                # ۱. بررسی تاریخ انقضا
+                cursor.execute("SELECT username, expire_date, status FROM users WHERE status='Active'")
+                active_users = cursor.fetchall()
+                for user in active_users:
+                    username, expire_date, status = user
+                    if expire_date and expire_date < today:
+                        subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        cursor.execute("UPDATE users SET status='Expired' WHERE username=?", (username,))
+                        subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            # ۲. بررسی اتمام حجم کالیبره شده
-            cursor.execute("SELECT username, limit_gb, used_gb, status FROM users")
-            for row in cursor.fetchall():
-                username, limit_gb, used_gb, status = row
-                if used_gb >= limit_gb and status == 'Active':
-                    subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    cursor.execute("UPDATE users SET status='Traffic_Limit' WHERE username=?", (username,))
-                    subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                # ۲. بررسی اتمام حجم
+                cursor.execute("SELECT username, limit_gb, used_gb, status FROM users")
+                for row in cursor.fetchall():
+                    username, limit_gb, used_gb, status = row
+                    if used_gb >= limit_gb and status == 'Active':
+                        subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        cursor.execute("UPDATE users SET status='Traffic_Limit' WHERE username=?", (username,))
+                        subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            # ۳. جلوگیری از مولتی لوگین (تک کاربره واقعی)
-            active_connections = get_sshd_connections()
-            for username, pids in active_connections.items():
-                if len(pids) > 1:
-                    for extra_pid in pids[1:]:
-                        subprocess.run(["sudo", "kill", "-9", extra_pid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                        
-            conn.commit()
-            conn.close()
+                # ۳. جلوگیری از مولتی لوگین
+                active_connections = get_sshd_connections()
+                for username, pids in active_connections.items():
+                    if len(pids) > 1:
+                        for extra_pid in pids[1:]:
+                            subprocess.run(["sudo", "kill", "-9", extra_pid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                            
+                conn.commit()
+                conn.close()
         except Exception as e:
-            pass
-        time.sleep(1)
+            print(f"Error in core monitoring logic: {e}")
+        time.sleep(2)
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -172,7 +178,7 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <title>⚡ SSH PRO - GLASS UI PREMIUM ⚡</title>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght=300;400;700&display=swap');
         
         :root {
             --accent-blue: #007aff;
@@ -459,11 +465,12 @@ def index():
 @app.route('/api/live_data')
 def live_data():
     try:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute("SELECT username, password, limit_gb, used_gb, expire_date, status, initial_days FROM users")
-        rows = cursor.fetchall()
-        conn.close()
+        with db_lock:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT username, password, limit_gb, used_gb, expire_date, status, initial_days FROM users")
+            rows = cursor.fetchall()
+            conn.close()
         
         today = datetime.datetime.now().date()
         users_list = []
@@ -493,58 +500,63 @@ def add_user():
         days = int(request.form['days'].strip())
         expire_date = (datetime.datetime.now() + datetime.timedelta(days=days)).strftime("%Y-%m-%d")
         
+        # ایجاد امن کاربر در سیستم عامل
         safe_system_user_create(username, password)
         
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute("INSERT OR REPLACE INTO users (username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days) VALUES (?, ?, ?, 0.0, ?, 'Active', ?, ?)",
-                       (username, password, limit_gb, expire_date, limit_gb, days))
-        conn.commit()
-        conn.close()
-    except:
-        pass
+        with db_lock:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("INSERT OR REPLACE INTO users (username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days) VALUES (?, ?, ?, 0.0, ?, 'Active', ?, ?)",
+                           (username, password, limit_gb, expire_date, limit_gb, days))
+            conn.commit()
+            conn.close()
+    except Exception as e:
+        print(f"Error adding user: {e}")
     return redirect('/')
 
 @app.route('/renew/<username>')
 def renew_user(username):
     try:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute("SELECT initial_gb, initial_days FROM users WHERE username=?", (username,))
-        row = cursor.fetchone()
-        if row:
-            init_gb, init_days = row
-            new_expire = (datetime.datetime.now() + datetime.timedelta(days=init_days)).strftime("%Y-%m-%d")
-            cursor.execute("UPDATE users SET used_gb=0.0, limit_gb=?, expire_date=?, status='Active' WHERE username=?", 
-                           (init_gb, new_expire, username))
-            conn.commit()
-            subprocess.run(["sudo", "usermod", "-U", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        conn.close()
-    except:
-        pass
+        with db_lock:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT initial_gb, initial_days FROM users WHERE username=?", (username,))
+            row = cursor.fetchone()
+            if row:
+                init_gb, init_days = row
+                new_expire = (datetime.datetime.now() + datetime.timedelta(days=init_days)).strftime("%Y-%m-%d")
+                cursor.execute("UPDATE users SET used_gb=0.0, limit_gb=?, expire_date=?, status='Active' WHERE username=?", 
+                               (init_gb, new_expire, username))
+                conn.commit()
+                subprocess.run(["sudo", "usermod", "-U", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            conn.close()
+    except Exception as e:
+        print(f"Error renewing user: {e}")
     return redirect('/')
 
 @app.route('/delete/<username>')
 def delete_user(username):
     try:
         subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM users WHERE username=?", (username,))
-        conn.commit()
-        conn.close()
-    except:
-        pass
+        with db_lock:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM users WHERE username=?", (username,))
+            conn.commit()
+            conn.close()
+    except Exception as e:
+        print(f"Error deleting user: {e}")
     return redirect('/')
 
 @app.route('/backup/download')
 def download_backup():
     try:
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        cursor.execute("SELECT username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days FROM users")
-        rows = cursor.fetchall()
-        conn.close()
+        with db_lock:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days FROM users")
+            rows = cursor.fetchall()
+            conn.close()
         
         backup_data = []
         for row in rows:
@@ -567,40 +579,44 @@ def restore_backup():
         if file.filename == '' or not file: return redirect('/')
         
         data = json.load(file)
-        conn = sqlite3.connect(DB_FILE)
-        cursor = conn.cursor()
-        for item in data:
-            username = item['username']
-            password = item['password']
-            limit_gb = item['limit_gb']
-            used_gb = item['used_gb']
-            expire_date = item['expire_date']
-            status = item['status']
-            init_gb = item.get('initial_gb', limit_gb)
-            init_days = item.get('initial_days', 30)
-            
-            safe_system_user_create(username, password)
-            if status != 'Active':
-                subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        with db_lock:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            for item in data:
+                username = item['username']
+                password = item['password']
+                limit_gb = item['limit_gb']
+                used_gb = item['used_gb']
+                expire_date = item['expire_date']
+                status = item['status']
+                init_gb = item.get('initial_gb', limit_gb)
+                init_days = item.get('initial_days', 30)
                 
-            cursor.execute('''
-                INSERT OR REPLACE INTO users (username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (username, password, limit_gb, used_gb, expire_date, status, init_gb, init_days))
-        conn.commit()
-        conn.close()
+                safe_system_user_create(username, password)
+                if status != 'Active':
+                    subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    
+                cursor.execute('''
+                    INSERT OR REPLACE INTO users (username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (username, password, limit_gb, used_gb, expire_date, status, init_gb, init_days))
+            conn.commit()
+            conn.close()
         flash("ریستور با موفقیت انجام شد.")
     except Exception as e:
         flash(f"خطا در ریستور: {str(e)}")
     return redirect('/')
 
 def safe_system_user_create(username, password):
+    # چک کردن وجود یوزر با ماژول رسمی pwd به جای متن پاسورد جهت جلوگیری از تداخل اسم‌ها
     try:
-        with open('/etc/passwd', 'r') as f:
-            if username in f.read():
-                subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except:
+        pwd.getpwnam(username)
+        # اگر یوزر وجود داشت، آن را به طور امن حذف میکنیم تا مجدد ساخته شود
+        subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except KeyError:
+        # یوزر وجود ندارد و آماده ساخت است
         pass
+        
     subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True)
 
