@@ -4,15 +4,11 @@
 set +e
 
 clear
-echo -e "\e[1;33m[*] Deploying Anti-Deadlock Queue Engine for Instant Operations...\e[0m"
+echo -e "\e[1;33m[*] Restoring to Stable Core & Adding Live Resource Monitor...\e[0m"
 
 # آزاد کردن قفل‌های احتمالی سیستم‌عامل
 sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/cache/apt/archives/lock 2>/dev/null
 sudo dpkg --configure -a 2>/dev/null
-
-echo -e "\e[1;34m==================================================\e[0m"
-echo -e "\e[1;36m     SSH PRO PANEL (ANTI-BLOCKING QUEUE ENGINE)   \e[0m"
-echo -e "\e[1;34m==================================================\e[0m"
 
 DB_FILE="/etc/custom-panel/panel.db"
 WEB_PANEL_PORT=5000
@@ -32,18 +28,15 @@ install_prerequisites() {
 }
 
 create_panel_app() {
-    echo "[*] Injecting Anti-Deadlock Premium Web Panel..."
+    echo "[*] Injecting Optimized Premium Web Panel..."
     sudo tee /etc/custom-panel/app.py > /dev/null << 'EOF'
-import os, subprocess, datetime, sqlite3, json, time, threading, queue
+import os, subprocess, datetime, sqlite3, json, time, threading
 from flask import Flask, request, render_template_string, redirect, send_file, jsonify, flash
 
 app = Flask(__name__)
-app.secret_key = "ssh_pro_glass_premium_key_v7"
+app.secret_key = "ssh_pro_glass_premium_key_v8"
 DB_FILE = "/etc/custom-panel/panel.db"
 TRAFFIC_TRACKER = {}
-
-# ایجاد یک صف امن برای پردازش دستورات سیستمی به صورت سریالی جهت رفع لودینگ و تداخل قفل
-user_creation_queue = queue.Queue()
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -80,8 +73,26 @@ def get_sshd_connections():
         pass
     return connections
 
-def get_online_users():
-    return list(get_sshd_connections().keys())
+def get_system_resources():
+    """محاسبه دقیق و لایو میزان مصرف CPU و RAM سرور"""
+    cpu = 0.0
+    ram = 0.0
+    try:
+        # محاسبه مصرف CPU
+        cpu_output = subprocess.check_output("top -bn1 | grep 'Cpu(s)'", shell=True).decode()
+        idle = float(cpu_output.split()[7].replace(',', '.'))
+        cpu = 100.0 - idle
+    except:
+        pass
+    try:
+        # محاسبه مصرف RAM
+        ram_output = subprocess.check_output("free | grep Mem:", shell=True).decode().split()
+        total_ram = float(ram_output[1])
+        used_ram = float(ram_output[2])
+        ram = (used_ram / total_ram) * 100.0
+    except:
+        pass
+    return round(cpu, 1), round(ram, 1)
 
 def update_traffic_from_proc():
     global TRAFFIC_TRACKER
@@ -121,7 +132,7 @@ def update_traffic_from_proc():
             conn.close()
         except:
             pass
-        time.sleep(3) # بهینه‌سازی زمان استراحت برای جلوگیری از بلاک شدن دیتابیس
+        time.sleep(2)
 
 def monitor_core_logic():
     while True:
@@ -160,25 +171,7 @@ def monitor_core_logic():
             conn.close()
         except Exception as e:
             pass
-        time.sleep(2) # ایجاد فضای تنفس برای هسته لینوکس
-
-# کارگر پس‌زمینه برای پردازش بدون قطعی صف ساخت کاربران
-def queue_worker():
-    while True:
-        try:
-            task = user_creation_queue.get()
-            if task is None: break
-            username, password = task
-            
-            # اجرای کاملاً خطی و امن دستورات لینوکس بدون تداخل قفل فایل سیستم
-            subprocess.run(["sudo", "userdel", "-f", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            user_creation_queue.task_done()
-            time.sleep(0.2) # تاخیر ایمن میکروسکوپی
-        except:
-            pass
+        time.sleep(1)
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -223,7 +216,7 @@ HTML_TEMPLATE = """
         h1 { font-size: 26px; font-weight: 700; color: #fff; margin-bottom: 30px; display: flex; align-items: center; gap: 10px; }
         h2 { font-size: 18px; font-weight: 700; color: var(--accent-blue); margin-top: 40px; margin-bottom: 15px; }
         
-        .grid-header { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .grid-header { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 30px; }
         
         .card-inner { 
             background: rgba(15, 23, 42, 0.4); 
@@ -231,8 +224,17 @@ HTML_TEMPLATE = """
             padding: 22px; 
             border-radius: 16px; 
             border: 1px solid rgba(255, 255, 255, 0.05); 
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
         }
         
+        /* استایل مانیتورینگ منابع سیستم */
+        .resource-box { display: flex; justify-content: space-around; align-items: center; text-align: center; padding: 10px 0; }
+        .circle-progress { width: 90px; height: 90px; border-radius: 50%; background: conic-gradient(var(--accent-blue) 0%, rgba(255,255,255,0.08) 0%); display: flex; align-items: center; justify-content: center; position: relative; transition: all 0.5s ease; }
+        .circle-progress::before { content: ''; position: absolute; width: 76px; height: 76px; background: #151f32; border-radius: 50%; }
+        .circle-text { position: relative; z-index: 10; font-weight: 700; font-size: 14px; color: #fff; }
+
         form { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
         
         input { 
@@ -251,7 +253,6 @@ HTML_TEMPLATE = """
             background: rgba(255, 255, 255, 0.12);
             border-color: var(--accent-blue); 
             outline: none; 
-            box-shadow: 0 0 0 4px rgba(0, 122, 255, 0.25); 
         }
         
         button { 
@@ -266,7 +267,6 @@ HTML_TEMPLATE = """
             transition: all 0.2s ease; 
         }
         button:hover { filter: brightness(1.15); transform: scale(1.02); }
-        button:active { transform: scale(0.98); }
         .btn-blue { background: var(--accent-blue); } 
         .btn-green { background: var(--accent-green); } 
         .btn-red { background: var(--accent-red); }
@@ -279,15 +279,8 @@ HTML_TEMPLATE = """
             padding: 4px;
             border: 1px solid rgba(255, 255, 255, 0.05);
         }
-        .search-container input {
-            background: transparent;
-            border: none;
-            padding: 14px;
-        }
-        .search-container input:focus {
-            background: transparent;
-            box-shadow: none;
-        }
+        .search-container input { background: transparent; border: none; padding: 14px; }
+        .search-container input:focus { background: transparent; box-shadow: none; outline: none; }
 
         table { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 15px; background: rgba(15, 23, 42, 0.3); border-radius: 16px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.05); }
         th, td { padding: 16px; text-align: center; font-size: 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
@@ -323,16 +316,41 @@ HTML_TEMPLATE = """
 
         <div class="grid-header">
             <div class="card-inner">
-                <h3 style="margin-top:0; font-size:15px; color:var(--accent-green);">📥 دانلود نسخه پشتیبان</h3>
-                <p style="color:var(--text-muted); font-size:13px; margin-bottom:15px;">استخراج خروجی فایل زنده JSON از اطلاعات دیتابیس کاربران.</p>
-                <a href="/backup/download"><button class="btn-green" style="width:100%;">📥 دانلود بک‌آب دیتابیس</button></a>
+                <h3 style="margin-top:0; font-size:15px; color:var(--accent-blue); text-align: center; margin-bottom: 12px;">📊 وضعیت زنده منابع سرور</h3>
+                <div class="resource-box">
+                    <div>
+                        <div class="circle-progress" id="cpu-circle">
+                            <div class="circle-text" id="cpu-text">0%</div>
+                        </div>
+                        <div style="font-size:12px; margin-top:8px; color:var(--text-muted);">CPU Usage</div>
+                    </div>
+                    <div>
+                        <div class="circle-progress" id="ram-circle" style="background: conic-gradient(var(--accent-yellow) 0%, rgba(255,255,255,0.08) 0%);">
+                            <div class="circle-text" id="ram-text">0%</div>
+                        </div>
+                        <div style="font-size:12px; margin-top:8px; color:var(--text-muted);">RAM Usage</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card-inner" style="text-align: center;">
+                <h3 style="margin-top:0; font-size:15px; color:#64d2ff;">📈 مجموع ترافیک کل کاربران</h3>
+                <div style="font-size: 28px; font-weight: 700; margin: 10px 0; color: #fff;">
+                    <span id="total-server-usage">0.000</span> <span style="font-size:16px; color:var(--text-muted);">GB</span>
+                </div>
+                <p style="color:var(--text-muted); font-size:12px; margin: 0;">مجموع ترافیک دانلود و آپلود واقعی کالیبره شده کلاینت‌ها</p>
+            </div>
+
+            <div class="card-inner">
+                <h3 style="margin-top:0; font-size:14px; color:var(--accent-green);">📥 پشتیبان‌گیری دیتابیس</h3>
+                <p style="color:var(--text-muted); font-size:12px; margin-bottom:12px;">استخراج خروجی زنده JSON از اطلاعات کلاینت‌ها.</p>
+                <a href="/backup/download"><button class="btn-green" style="width:100%; padding: 10px;">📥 دانلود فایل بک‌آب</button></a>
             </div>
             <div class="card-inner">
-                <h3 style="margin-top:0; font-size:15px; color:var(--accent-red);">📤 بازگردانی دیتابیس کاربران</h3>
-                <p style="color:var(--text-muted); font-size:13px; margin-bottom:12px;">فایل دانلود شده قدیمی را برای جایگذاری بدون خطا آپلود کنید.</p>
-                <form action="/backup/restore" method="POST" enctype="multipart/form-data" style="flex-direction: column; align-items: stretch; gap: 8px;">
-                    <input type="file" name="backup_file" accept=".json" required>
-                    <button type="submit" class="btn-red">📤 شروع عملیات ریستور</button>
+                <h3 style="margin-top:0; font-size:14px; color:var(--accent-red);">📤 بازگردانی دیتابیس</h3>
+                <form action="/backup/restore" method="POST" enctype="multipart/form-data" style="flex-direction: column; align-items: stretch; gap: 6px;">
+                    <input type="file" name="backup_file" accept=".json" required style="padding: 6px;">
+                    <button type="submit" class="btn-red" style="padding: 10px;">📤 ریستور کل کاربران</button>
                 </form>
             </div>
         </div>
@@ -397,9 +415,21 @@ HTML_TEMPLATE = """
             try {
                 const response = await fetch('/api/live_data');
                 const data = await response.json();
+                
+                // بروزرسانی دایره‌های سیستم ریسورس
+                const cpuCircle = document.getElementById('cpu-circle');
+                cpuCircle.style.background = `conic-gradient(var(--accent-blue) ${data.cpu}%, rgba(255,255,255,0.08) ${data.cpu}%)`;
+                document.getElementById('cpu-text').innerText = data.cpu + '%';
+
+                const ramCircle = document.getElementById('ram-circle');
+                ramCircle.style.background = `conic-gradient(var(--accent-yellow) ${data.ram}%, rgba(255,255,255,0.08) ${data.ram}%)`;
+                document.getElementById('ram-text').innerText = data.ram + '%';
+
+                // بروزرسانی ترافیک کل مصرف شده در باکس کناری جدول
+                document.getElementById('total-server-usage').innerText = data.total_server_usage.toFixed(3);
+
                 const tbody = document.getElementById('user-table-body');
                 const searchInput = document.getElementById('search-input').value.toLowerCase();
-
                 tbody.innerHTML = '';
 
                 data.users.forEach(user => {
@@ -427,7 +457,6 @@ HTML_TEMPLATE = """
                     }
 
                     const tr = document.createElement('tr');
-                    
                     if (searchInput && !user.username.toLowerCase().includes(searchInput)) {
                         tr.style.display = "none";
                     }
@@ -480,6 +509,11 @@ def live_data():
         cursor = conn.cursor()
         cursor.execute("SELECT username, password, limit_gb, used_gb, expire_date, status, initial_days FROM users")
         rows = cursor.fetchall()
+        
+        # محاسبه مجموع ترافیک کل کلاینت‌ها به صورت یکجا
+        cursor.execute("SELECT SUM(used_gb) FROM users")
+        total_sum = cursor.fetchone()[0]
+        total_server_usage = total_sum if total_sum else 0.0
         conn.close()
         
         today = datetime.datetime.now().date()
@@ -497,9 +531,17 @@ def live_data():
                 "used_gb": used_gb if used_gb else 0.0, "remaining_days": remaining_days, "status": status,
                 "initial_days": init_days if init_days else 30
             })
-        return jsonify({"users": users_list, "online_users": get_online_users()})
+            
+        cpu_usage, ram_usage = get_system_resources()
+        return jsonify({
+            "users": users_list, 
+            "online_users": get_online_users(),
+            "cpu": cpu_usage,
+            "ram": ram_usage,
+            "total_server_usage": total_server_usage
+        })
     except Exception as e:
-        return jsonify({"users": [], "online_users": []})
+        return jsonify({"users": [], "online_users": [], "cpu": 0, "ram": 0, "total_server_usage": 0.0})
 
 @app.route('/add', methods=['POST'])
 def add_user():
@@ -510,7 +552,11 @@ def add_user():
         days = int(request.form['days'].strip())
         expire_date = (datetime.datetime.now() + datetime.timedelta(days=days)).strftime("%Y-%m-%d")
         
-        # ثبت ۱ میلی‌ثانیه‌ای در دیتابیس پنل
+        # متد اولیه امن لینوکس بدون بلاک کردن هسته سیستم‌عامل
+        subprocess.run(["sudo", "userdel", "-f", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True)
+        
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
         cursor.execute("INSERT OR REPLACE INTO users (username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days) VALUES (?, ?, ?, 0.0, ?, 'Active', ?, ?)",
@@ -518,12 +564,9 @@ def add_user():
         conn.commit()
         conn.close()
         
-        # ارسال امن کلاینت به صف پردازش سریال لینوکس جهت لغو لودینگ و رفع قفل دیتابیس
-        user_creation_queue.put((username, password))
-        
         flash("کاربر اختصاصی جدید با موفقیت ساخته و فعال شد.", "success")
     except Exception as e:
-        flash(f"خطا: {str(e)}", "danger")
+        flash(f"خطا در ساخت سریع کاربر: {str(e)}", "danger")
     return redirect('/')
 
 @app.route('/renew/<username>')
@@ -592,7 +635,6 @@ def restore_backup():
         data = json.load(file)
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        
         for item in data:
             username = item['username']
             password = item['password']
@@ -603,8 +645,11 @@ def restore_backup():
             init_gb = item.get('initial_gb', limit_gb)
             init_days = item.get('initial_days', 30)
             
-            # ارسال امن به صف سریال لینوکس کلاینت‌ها برای جلوگیری از قفل شدن فرآیند ریستور
-            user_creation_queue.put((username, password))
+            # بازگردانی همزمان کلاینت‌های لینوکس بدون تداخل قفل
+            subprocess.run(["sudo", "userdel", "-f", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True)
+            
             if status != 'Active':
                 subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 
@@ -612,18 +657,15 @@ def restore_backup():
                 INSERT OR REPLACE INTO users (username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ''', (username, password, limit_gb, used_gb, expire_date, status, init_gb, init_days))
-            
         conn.commit()
         conn.close()
-        flash("دیتابیس پشتیبان با موفقیت ریستور شد و کاربران در صف ساخت آنی قرار گرفتند.", "success")
+        flash("دیتابیس پشتیبان با متد پایدار اولیه با موفقیت بازگردانی شد.", "success")
     except Exception as e:
         flash(f"خطا در ریستور: {str(e)}", "danger")
     return redirect('/')
 
 if __name__ == '__main__':
     init_db()
-    # راه‌اندازی کارگر صف برای اعمال پسوردها بدون درگیری با هسته مانیتورینگ ترافیک
-    threading.Thread(target=queue_worker, daemon=True).start()
     threading.Thread(target=monitor_core_logic, daemon=True).start()
     threading.Thread(target=update_traffic_from_proc, daemon=True).start()
     app.run(host='0.0.0.0', port=5000)
@@ -639,6 +681,6 @@ install_prerequisites
 create_panel_app
 
 echo -e "\e[1;32m==================================================\e[0m"
-echo -e "\e[1;32m✔ SUCCESS: ANTI-DEADLOCK ENGINE INJECTED!         \e[0m"
-echo -e "\e[1;36m🌐 FIXED FOR RESTORE & INSTANT CREATION           \e[0m"
+echo -e "\e[1;32m✔ SUCCESS: STABLE CODE RESTORED!                  \e[0m"
+echo -e "\e[1;36m🌐 CPU/RAM MONITOR & TOTAL TRAFFIC MODULE ADDED   \e[0m"
 echo -e "\e[1;32m==================================================\e[0m"
