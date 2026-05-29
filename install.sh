@@ -37,16 +37,18 @@ WS_PORT=80
 WEB_PANEL_PORT=5000
 
 # ==================================================
-# تنظیمات سرور خارج (ساخت پنل وب اختصاصی پایتون)
+# تنظیمات سرور خارج
 # ==================================================
 if [ "$SERVER_ROLE" == "1" ]; then
     echo "[*] Configuring Server KHAREJ..."
     
     sudo ufw allow $TUNNEL_PORT/tcp comment 'GOST Tunnel'
     sudo ufw allow $WEB_PANEL_PORT/tcp comment 'Custom Web GUI'
+    sudo ufw allow 5000/tcp
+    sudo ufw reload
     
     # ساخت سرویس GOST برای خارج
-    sudo bash -c "cat <<EOF > /etc/systemd/system/gost-tunnel.service
+    sudo tee /etc/systemd/system/gost-tunnel.service > /dev/null <<EOF
 [Unit]
 Description=Gost Tunnel Server on Kharej
 After=network.target
@@ -59,15 +61,14 @@ RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
-EOF"
+EOF
+
     sudo systemctl daemon-reload && sudo systemctl enable gost-tunnel.service && sudo systemctl start gost-tunnel.service
 
-    # ساخت پوشه پنل وب اختصاصی
     echo "[*] Creating Custom Web GUI Panel..."
     sudo mkdir -p /etc/custom-panel
     sudo touch /etc/custom-panel/users.db
 
-    # کدهای سرور وب پایتون (Flask) با متد امن tee
     sudo tee /etc/custom-panel/app.py > /dev/null << 'EOF'
 import os, subprocess
 from flask import Flask, request, render_template_string, redirect
@@ -176,8 +177,7 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
 EOF
 
-    # ساخت سرویس برای اجرای دائمی پنل وب اختصاصی در پس‌زمینه
-    sudo bash -c "cat <<EOF > /etc/systemd/system/custom-panel.service
+    sudo tee /etc/systemd/system/custom-panel.service > /dev/null <<EOF
 [Unit]
 Description=Custom Web GUI Panel
 After=network.target
@@ -189,13 +189,12 @@ Restart=always
 
 [Install]
 WantedBy=multi-user.target
-EOF"
+EOF
 
     sudo systemctl daemon-reload
     sudo systemctl enable custom-panel.service
     sudo systemctl start custom-panel.service
     
-    # اسکریپت کنترل اکانت‌های همزمان با متد امن tee
     sudo tee /etc/custom-panel/kill-multi.sh > /dev/null << 'EOF'
 #!/bin/bash
 while true; do
@@ -213,8 +212,7 @@ done
 EOF
     sudo chmod +x /etc/custom-panel/kill-multi.sh
     
-    # ساخت سرویس تک‌کاربره
-    sudo bash -c "cat <<EOF > /etc/systemd/system/ssh-kill-multi.service
+    sudo tee /etc/systemd/system/ssh-kill-multi.service > /dev/null <<EOF
 [Unit]
 Description=Kill Multi Login SSH
 After=network.target
@@ -226,7 +224,7 @@ Restart=always
 
 [Install]
 WantedBy=multi-user.target
-EOF"
+EOF
     sudo systemctl daemon-reload
     sudo systemctl enable ssh-kill-multi.service && sudo systemctl start ssh-kill-multi.service
 
@@ -236,7 +234,7 @@ EOF"
     echo "=================================================="
 
 # ==================================================
-# تنظیمات سرور ایران (بدون تغییر)
+# تنظیمات سرور ایران (اصلاح شده و قطعی)
 # ==================================================
 elif [ "$SERVER_ROLE" == "2" ]; then
     echo "[*] Configuring Server IRAN..."
@@ -244,8 +242,9 @@ elif [ "$SERVER_ROLE" == "2" ]; then
     
     sudo ufw allow $IRAN_ENTRY_PORT/tcp
     sudo ufw allow $WS_PORT/tcp
+    sudo ufw reload
 
-    sudo bash -c "cat <<EOF > /etc/systemd/system/gost-tunnel.service
+    sudo tee /etc/systemd/system/gost-tunnel.service > /dev/null <<EOF
 [Unit]
 Description=Gost Tunnel Client on Iran
 After=network.target
@@ -254,7 +253,10 @@ After=network.target
 Type=simple
 ExecStart=/usr/local/bin/gost -L tcp://:$IRAN_ENTRY_PORT -F rtcp://$KHAREJ_IP:$TUNNEL_PORT
 Restart=always
-EOF"
+
+[Install]
+WantedBy=multi-user.target
+EOF
     sudo systemctl daemon-reload && sudo systemctl enable gost-tunnel.service && sudo systemctl start gost-tunnel.service
 
     echo "[*] Creating WebSocket Python Proxy..."
@@ -291,7 +293,7 @@ while True:
     threading.Thread(target=handle_client, args=(client,)).start()
 EOF
 
-    sudo bash -c "cat <<EOF > /etc/systemd/system/ssh-ws.service
+    sudo tee /etc/systemd/system/ssh-ws.service > /dev/null <<EOF
 [Unit]
 Description=SSH WebSocket Proxy for Npv
 After=network.target
@@ -300,7 +302,10 @@ After=network.target
 Type=simple
 ExecStart=/usr/bin/python3 /etc/ssh-ws/ws-proxy.py
 Restart=always
-EOF"
+
+[Install]
+WantedBy=multi-user.target
+EOF
     sudo systemctl daemon-reload && sudo systemctl enable ssh-ws.service && sudo systemctl start ssh-ws.service
     
     echo "=================================================="
