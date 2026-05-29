@@ -4,27 +4,27 @@
 set +e
 
 clear
-echo -e "\e[1;33m[*] Calibrating Traffic Counter & Optimizing Byte-to-GB Formula...\e[0m"
+echo -e "\e[1;33m[*] Fixing Instant User Creation & Aligning iOS Notification Colors...\e[0m"
 
 # آزاد کردن قفل‌های سیستم‌عامل
 sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/cache/apt/archives/lock 2>/dev/null
 sudo dpkg --configure -a 2>/dev/null
 
 echo -e "\e[1;34m==================================================\e[0m"
-echo -e "\e[1;36m     SSH PRO PANEL (CALIBRATED ACCURATE TRAFFIC)   \e[0m"
+echo -e "\e[1;36m     SSH PRO PANEL (FAST ADD & FIX NOTIFICATIONS) \e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
 
 DB_FILE="/etc/custom-panel/panel.db"
 WEB_PANEL_PORT=5000
 
 update_and_replace_logic() {
-    echo "[*] Ensuring port 5000 is clean..."
+    echo "[*] Cleaning up port 5000 gracefully..."
     sudo fuser -k $WEB_PANEL_PORT/tcp 2>/dev/null
     sudo mkdir -p /etc/custom-panel
 }
 
 install_prerequisites() {
-    echo "[*] Reviewing server packages..."
+    echo "[*] Checking essential binaries..."
     set -e
     sudo apt update -y
     sudo apt install -y openssh-server python3 python3-pip python3-flask ufw sqlite3 bc psmisc net-tools
@@ -32,13 +32,13 @@ install_prerequisites() {
 }
 
 create_panel_app() {
-    echo "[*] Injecting Updated iOS Glassmorphism Web Panel..."
+    echo "[*] Injecting Optimized Glassmorphism Web Panel..."
     sudo tee /etc/custom-panel/app.py > /dev/null << 'EOF'
 import os, subprocess, datetime, sqlite3, json, time, threading
 from flask import Flask, request, render_template_string, redirect, send_file, jsonify, flash
 
 app = Flask(__name__)
-app.secret_key = "ssh_pro_glass_premium_key_v4"
+app.secret_key = "ssh_pro_glass_premium_key_v5"
 DB_FILE = "/etc/custom-panel/panel.db"
 TRAFFIC_TRACKER = {}
 
@@ -81,7 +81,6 @@ def get_online_users():
     return list(get_sshd_connections().keys())
 
 def update_traffic_from_proc():
-    """موتور مانیتورینگ ترافیک کالیبره شده و دقیق‌شده با حجم مصرفی واقعی گوشی"""
     global TRAFFIC_TRACKER
     while True:
         try:
@@ -100,7 +99,6 @@ def update_traffic_from_proc():
                             for line in lines:
                                 if ":" in line:
                                     parts = line.split()
-                                    # جمع بایت‌های ورودی و خروجی سوکت
                                     bytes_sum += int(parts[1]) + int(parts[9])
                             
                             if username not in TRAFFIC_TRACKER:
@@ -109,12 +107,8 @@ def update_traffic_from_proc():
                             
                             diff = bytes_sum - TRAFFIC_TRACKER[username]["last_bytes"]
                             if diff > 0:
-                                # اعمال ضریب کالیبراسیون (0.68) جهت حذف سربار پروتکل SSH/TCP Encapsulation
-                                # این ضریب باعث می‌شود حجم مانیتور شده کاملاً با کانکشن گوشی همسان شود.
                                 calibrated_bytes = diff * 0.68
                                 diff_gb = calibrated_bytes / (1024.0 * 1024.0 * 1024.0)
-                                
-                                # بروزرسانی مستقیم دیتابیس با دقت بالا
                                 cursor.execute("UPDATE users SET used_gb = used_gb + ? WHERE username = ?", (diff_gb, username))
                             
                             TRAFFIC_TRACKER[username]["last_bytes"] = bytes_sum
@@ -133,7 +127,7 @@ def monitor_core_logic():
             conn = sqlite3.connect(DB_FILE)
             cursor = conn.cursor()
             
-            # ۱. بررسی تاریخ انقضا
+            # ۱. بررسی انقضای تاریخ دوره
             cursor.execute("SELECT username, expire_date, status FROM users WHERE status='Active'")
             active_users = cursor.fetchall()
             for user in active_users:
@@ -143,7 +137,7 @@ def monitor_core_logic():
                     cursor.execute("UPDATE users SET status='Expired' WHERE username=?", (username,))
                     subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            # ۲. بررسی اتمام حجم کالیبره شده
+            # ۲. مانیتور ترافیک مصرفی
             cursor.execute("SELECT username, limit_gb, used_gb, status FROM users")
             for row in cursor.fetchall():
                 username, limit_gb, used_gb, status = row
@@ -152,10 +146,11 @@ def monitor_core_logic():
                     cursor.execute("UPDATE users SET status='Traffic_Limit' WHERE username=?", (username,))
                     subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            # ۳. جلوگیری از مولتی لوگین (تک کاربره واقعی)
+            # ۳. قطع ارتباط فوری و آنی مولتی لوگین (تک کاربره فوق سخت‌گیرانه)
             active_connections = get_sshd_connections()
             for username, pids in active_connections.items():
                 if len(pids) > 1:
+                    # نگه داشتن اولین کانکشن و بستن بی رحمانه کانکشن‌های دوم به بعد
                     for extra_pid in pids[1:]:
                         subprocess.run(["sudo", "kill", "-9", extra_pid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                         
@@ -283,7 +278,10 @@ HTML_TEMPLATE = """
         .badge { padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 700; display: inline-block; }
         .online { background: rgba(52, 199, 89, 0.15); color: #34c759; border: 1px solid rgba(52, 199, 89, 0.3); }
         .offline { background: rgba(161, 161, 170, 0.15); color: #cbd5e1; border: 1px solid rgba(161, 161, 170, 0.3); }
-        .alert-flash { padding: 14px; background: rgba(255, 59, 48, 0.15); border: 1px solid var(--accent-red); color: #ff3b30; border-radius: 12px; margin-bottom: 25px; text-align: center; font-weight: 700; }
+        
+        /* نوتیفیکیشن‌های تفکیک‌شده بر اساس وضعیت */
+        .alert-success { padding: 14px; background: rgba(52, 199, 89, 0.15); border: 1px solid var(--accent-green); color: #34c759; border-radius: 12px; margin-bottom: 25px; text-align: center; font-weight: 700; }
+        .alert-danger { padding: 14px; background: rgba(255, 59, 48, 0.15); border: 1px solid var(--accent-red); color: #ff3b30; border-radius: 12px; margin-bottom: 25px; text-align: center; font-weight: 700; }
         
         .progress-wrapper { width: 230px; text-align: right; margin: auto; }
         .progress-text { display: flex; justify-content: space-between; font-size: 12px; color: #a1a1aa; margin-bottom: 5px; }
@@ -296,10 +294,10 @@ HTML_TEMPLATE = """
     <div class="container">
         <h1>⚡ کنترل پنل هوشمند شیشه‌ای SSH PRO</h1>
         
-        {% with messages = get_flashed_messages() %}
+        {% with messages = get_flashed_messages(with_categories=true) %}
           {% if messages %}
-            {% for message in messages %}
-              <div class="alert-flash">⚠️ {{ message }}</div>
+            {% for category, message in messages %}
+              <div class="alert-{{ category }}">📢 {{ message }}</div>
             {% endfor %}
           {% endif %}
         {% endwith %}
@@ -493,6 +491,7 @@ def add_user():
         days = int(request.form['days'].strip())
         expire_date = (datetime.datetime.now() + datetime.timedelta(days=days)).strftime("%Y-%m-%d")
         
+        # متد بهینه‌شده بدون لودینگ
         safe_system_user_create(username, password)
         
         conn = sqlite3.connect(DB_FILE)
@@ -501,8 +500,9 @@ def add_user():
                        (username, password, limit_gb, expire_date, limit_gb, days))
         conn.commit()
         conn.close()
-    except:
-        pass
+        flash("کاربر اختصاصی جدید با موفقیت ساخته و فعال شد.", "success")
+    except Exception as e:
+        flash(f"خطا در ساخت کاربر: {str(e)}", "danger")
     return redirect('/')
 
 @app.route('/renew/<username>')
@@ -520,6 +520,7 @@ def renew_user(username):
             conn.commit()
             subprocess.run(["sudo", "usermod", "-U", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         conn.close()
+        flash(f"دوره کاربر {username} با موفقیت تمدید شد.", "success")
     except:
         pass
     return redirect('/')
@@ -527,12 +528,13 @@ def renew_user(username):
 @app.route('/delete/<username>')
 def delete_user(username):
     try:
-        subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["sudo", "userdel", "-f", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
         cursor.execute("DELETE FROM users WHERE username=?", (username,))
         conn.commit()
         conn.close()
+        flash(f"کاربر {username} کاملاً از سیستم حذف گردید.", "danger")
     except:
         pass
     return redirect('/')
@@ -589,16 +591,15 @@ def restore_backup():
             ''', (username, password, limit_gb, used_gb, expire_date, status, init_gb, init_days))
         conn.commit()
         conn.close()
-        flash("ریستور با موفقیت انجام شد.")
+        flash("دیتابیس پشتیبان با موفقیت ریستور شد.", "success")
     except Exception as e:
-        flash(f"خطا در ریستور: {str(e)}")
+        flash(f"خطا در ریستور: {str(e)}", "danger")
     return redirect('/')
 
 def safe_system_user_create(username, password):
     try:
-        with open('/etc/passwd', 'r') as f:
-            if username in f.read():
-                subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # حذف کاربر قدیمی بدون فلش آپشن سنگین دایرکتوری برای رفع آنی لودینگ
+        subprocess.run(["sudo", "userdel", "-f", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except:
         pass
     subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -611,23 +612,8 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
 EOF
 
-    echo "[*] Aligning Custom Service Daemon..."
-    sudo tee /etc/systemd/system/custom-panel.service > /dev/null <<EOF
-[Unit]
-Description=SSH Advanced GUI Dark Panel Ultimate
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/python3 /etc/custom-panel/app.py
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
+    echo "[*] Restarting Daemon Layout..."
     sudo systemctl daemon-reload
-    sudo systemctl enable custom-panel.service
     sudo systemctl restart custom-panel.service
 }
 
@@ -636,6 +622,6 @@ install_prerequisites
 create_panel_app
 
 echo -e "\e[1;32m==================================================\e[0m"
-echo -e "\e[1;32m✔ TRAFFIC CALIBRATED SUCCESSFULLY!                \e[0m"
-echo -e "\e[1;36m🌐 READY AND STABLE ON PORT 5000                   \e[0m"
+echo -e "\e[1;32m✔ SUCCESS: PANEL FULLY FIXED & OPTIMIZED!         \e[0m"
+echo -e "\e[1;36m🌐 SYSTEM RUNNING INSTANTLY ON PORT 5000           \e[0m"
 echo -e "\e[1;32m==================================================\e[0m"
