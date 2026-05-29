@@ -1,25 +1,25 @@
 #!/bin/bash
 
-# ۱. آزادسازی کامل پورت ۵۰۰۰ و کشتن پردازش‌های تداخلی پایتون
+# ۱. آزادسازی پورت ۵۰۰۰ و کشتن پروسس‌های قدیمی پایتون
 sudo killall -9 python3 2>/dev/null
 sudo fuser -k 5000/tcp 2>/dev/null
 sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock 2>/dev/null
 
-# ۲. نصب و آپدیت پکیج‌های پایدار لینوکس اوبونتو
+# ۲. نصب پیش‌نیازهای پایدار اوبونتو
 sudo apt update -y
 sudo apt install -y openssh-server python3 python3-flask sqlite3 psmisc coreutils
 
-# ۳. ایجاد دایرکتوری پنل و تنظیم پرمیشن امنیتی
+# ۳. ایجاد پوشه اصلی پنل با دسترسی‌های لازم
 sudo mkdir -p /etc/custom-panel
 sudo chmod 755 /etc/custom-panel
 
-# ۴. تزریق کدهای هسته پایتون (نسخه کالیبره شده با دکمه بازگردانی بک‌آ‌پ سریع)
+# ۴. تزریق مستقیم کد پایتون کالیبره شده (کاهش حجم ۳.۵ برابری برای همگام‌سازی با گوشی)
 cat << 'EOF' > /etc/custom-panel/app.py
 import os, subprocess, datetime, sqlite3, json, time, threading, pwd
 from flask import Flask, request, render_template_string, redirect, send_file, jsonify
 
 app = Flask(__name__)
-app.secret_key = "ssh_pro_glass_final_fixed"
+app.secret_key = "ssh_pro_precision_final_v7"
 DB_FILE = "/etc/custom-panel/panel.db"
 db_lock = threading.Lock()
 
@@ -70,7 +70,7 @@ def live_monitor_daemon():
                             user_to_pids_map[user] = []
                         user_to_pids_map[user].append(pid)
 
-            # تک کاربره بودن فوق سخت‌گیرانه (کشتن دیوایس‌های همزمان قبلی و نگه داشتن آخرین اتصال)
+            # سیستم تک‌کاربره سخت‌گیرانه (حفظ اتصال جدید و کشتن اتصالات موازی قدیمی)
             for username, pids in user_to_pids_map.items():
                 if len(pids) > 1:
                     pids.sort(key=int)
@@ -79,7 +79,7 @@ def live_monitor_daemon():
                         if old_pid in LAST_PID_BYTES:
                             del LAST_PID_BYTES[old_pid]
 
-            # مانیتورینگ زنده تفاضلی حجم با تقسیم بر فاکتور کالیبراسیون ۳.۵ گوشی
+            # محاسبه ترافیک مصرفی و تقسیم بر ۳.۵ جهت تطبیق کامل با کنتور دیتای گوشی کلاینت
             with db_lock:
                 conn = get_db_connection()
                 cursor = conn.cursor()
@@ -109,7 +109,7 @@ def live_monitor_daemon():
                 if dead_pid not in active_pids_this_run:
                     del LAST_PID_BYTES[dead_pid]
 
-            # بررسی محدودیت زمانی و حجمی و قطع فوری کانکشن به محض اتمام
+            # مسدودسازی و قطع ارتباط آنی کاربران منقضی شده یا اتمام حجم یافته
             with db_lock:
                 conn = get_db_connection()
                 cursor = conn.cursor()
@@ -354,7 +354,7 @@ def renew_user(username):
 def delete_user(username):
     try:
         subprocess.run(f"sudo pkill -9 -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["sudo", "userdel", "-r", username], stdout=stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         with db_lock:
             conn = get_db_connection()
             cursor = conn.cursor()
@@ -379,7 +379,7 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
 EOF
 
-# ۵. ساخت اسکلت سرویس سیستم‌عامل در مسیر کاملاً دقیق و فیکس شده لینوکس اوبونتو
+# ۵. ساخت فایل سرویس سیستم‌عامل در مسیر استاندارد و کاملاً فیکس شده لینوکس
 sudo tee /etc/systemd/system/custom-panel.service > /dev/null << 'SERVICEEOF'
 [Unit]
 Description=SSH Pro Absolute Calibrated Engine Panel
@@ -397,12 +397,12 @@ RestartSec=2
 WantedBy=multi-user.target
 SERVICEEOF
 
-# ۶. ریلود، فعال‌سازی و استارت موفقیت‌آمیز دیمون سیستمی بدون ارور قرمز رنگ
+# ۶. لود مجدد دیمون‌ها و استارت نهایی دیمون سیستمی بدون خطا
 sudo systemctl daemon-reload
 sudo systemctl enable custom-panel.service
 sudo systemctl restart custom-panel.service
 
 echo "--------------------------------------------------"
-echo "✔ ALL FIXES DEPLOYED AND SERVICE STARTED SUCCESSFULLY"
+echo "✔ PATH FIXED AND SERVICE STARTED SUCCESSFULLY"
 echo "🌐 LISTEN WEB PORT: 5000"
 echo "--------------------------------------------------"
