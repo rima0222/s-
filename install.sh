@@ -13,7 +13,7 @@ sudo dpkg --configure -a || true
 
 echo -e "\e[1;32m✔ System locks cleared successfully.\e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
-echo -e "\e[1;36m  SSH PRO PANEL (IPTABLES NATIVE REAL TRAFFIC)    \e[0m"
+echo -e "\e[1;36m       SSH PRO PANEL (UBUNTU 24.04 FIX)           \e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
 
 # ۲. ایجاد مکث ۳ ثانیه‌ای به صورت شمارش معکوس زنده
@@ -36,7 +36,6 @@ purge_old_installation() {
     sudo rm -f /etc/systemd/system/custom-panel.service
     sudo systemctl daemon-reload
     
-    # پاکسازی رول‌های قدیمی iptables برای جلوگیری از تداخل ترافیک
     sudo iptables -F || true
     sudo iptables -X || true
     
@@ -50,9 +49,10 @@ install_prerequisites() {
     sudo systemctl stop apt-daily.timer 2>/dev/null || true
     sudo systemctl stop apt-daily-upgrade.timer 2>/dev/null || true
     
-    echo "[*] Installing required system packages..."
+    echo "[*] Installing required system packages (Fixing space and packet breaks)..."
     sudo apt update -y
-    sudo apt install -y openssh-server python3 python3-pip python3-flask ufw sqlite3 bc psmisc iptables iptables-persistent
+    # رفع مشکل تداخل پکیج‌ها در اوبونتو ۲۴.۰۴ با حذف نسخه‌های قدیمی ماندگار
+    sudo apt install -y openssh-server python3 python3-pip python3-flask ufw sqlite3 bc psmisc iptables net-tools vnstat
     
     # تنظیم فایروال سرور
     sudo ufw allow $WEB_PANEL_PORT/tcp comment 'Web Panel'
@@ -93,13 +93,14 @@ def init_db():
 def get_sshd_connections():
     connections = {}
     try:
-        output = subprocess.check_output("ps -eo user,pid,command | grep -E 'sshd:'", shell=True).decode()
+        # اصلاح فیلتر پروسس برای هر دو نسخه قدیمی و جدید اوبونتو (ssh/sshd)
+        output = subprocess.check_output("ps -eo user,pid,command | grep -E 'sshd:|ssh:'", shell=True).decode()
         for line in output.strip().split('\n'):
             parts = line.split()
             if len(parts) >= 3:
                 user = parts[0]
                 pid = parts[1]
-                if user not in ['root', 'sshd', 'nobody'] and 'net' not in user:
+                if user not in ['root', 'sshd', 'nobody', 'ssh'] and 'net' not in user:
                     if user not in connections:
                         connections[user] = []
                     connections[user].append(pid)
@@ -111,9 +112,7 @@ def get_online_users():
     return list(get_sshd_connections().keys())
 
 def setup_iptables_for_user(username):
-    """ایجاد رول فایروال اختصاصی در هسته لینوکس برای شمارش بایت‌های واقعی کاربر"""
     try:
-        # ردیابی ترافیک خروجی (دانلود کاربر) و ترافیک ورودی (آپلود کاربر) بر اساس یوزر سیستم
         subprocess.run(f"sudo iptables -N SSH_{username} 2>/dev/null || true", shell=True)
         subprocess.run(f"sudo iptables -A OUTPUT -m owner --uid-owner {username} -j SSH_{username} 2>/dev/null || true", shell=True)
         subprocess.run(f"sudo iptables -A INPUT -m owner --uid-owner {username} -j SSH_{username} 2>/dev/null || true", shell=True)
@@ -121,21 +120,17 @@ def setup_iptables_for_user(username):
         pass
 
 def get_iptables_traffic(username):
-    """خواندن حجم واقعی مصرف شده بر اساس بایت مستقیم از فایروال لینوکس"""
     try:
         setup_iptables_for_user(username)
-        # خروجی بایت‌های عبور کرده از رول اختصاصی کاربر
         output = subprocess.check_output(f"sudo iptables -L OUTPUT -v -n -x | grep -E 'owner UID match {username}|SSH_{username}' || true", shell=True).decode()
         bytes_total = 0
         for line in output.strip().split('\n'):
             parts = line.split()
             if len(parts) > 0:
                 try:
-                    bytes_total += int(parts[0]) # ایندکس اول مقدار دقیق بایت‌هاست
+                    bytes_total += int(parts[0])
                 except:
                     pass
-        
-        # تبدیل بایت به گیگابایت واقعی (بدون هیچ ثابت فرضی)
         gb_used = bytes_total / (1024.0 * 1024.0 * 1024.0)
         return gb_used
     except:
@@ -160,7 +155,6 @@ def monitor_core_logic():
             conn = sqlite3.connect(DB_FILE)
             cursor = conn.cursor()
             
-            # ۱. بررسی انقضای تاریخ سیستم
             cursor.execute("SELECT username, expire_date, status FROM users WHERE status='Active'")
             active_users = cursor.fetchall()
             for user in active_users:
@@ -170,30 +164,24 @@ def monitor_core_logic():
                     cursor.execute("UPDATE users SET status='Expired' WHERE username=?", (username,))
                     subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            # ۲. بررسی تک‌کاربره بودن و استخراج حجم بایت‌به‌بایت از فایروال لینوکس
             active_connections = get_sshd_connections()
             
             cursor.execute("SELECT username, limit_gb, used_gb, status FROM users")
             db_users = {r[0]: {"limit": r[1], "used": r[2], "status": r[3]} for r in cursor.fetchall()}
             
-            # بروزرسانی حجم تمام کاربران بر اساس دیتای زنده فایروال لینوکس
             for username in db_users.keys():
                 userdata = db_users[username]
-                
-                # خواندن مستقیم بایت‌های واقعی کارت شبکه سرور برای این یوزر
                 real_gb_used = get_iptables_traffic(username)
                 
                 if real_gb_used > 0:
                     cursor.execute("UPDATE users SET used_gb=? WHERE username=?", (real_gb_used, username))
                     userdata['used'] = real_gb_used
 
-                # قطع دسترسی آنی در صورت اتمام حجم واقعی
                 if userdata['used'] >= userdata['limit'] and userdata['status'] == 'Active':
                     subprocess.run(["sudo", "usermod", "-L", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     cursor.execute("UPDATE users SET status='Traffic_Limit' WHERE username=?", (username,))
                     subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            # ۳. لیمیت کردن تعداد دستگاه‌ها (تک‌کاربره نیتیو مطلق)
             for username, pids in active_connections.items():
                 if len(pids) > 1:
                     for extra_pid in pids[1:]:
@@ -204,7 +192,6 @@ def monitor_core_logic():
         except Exception as e:
             print(f"Core Engine Warning: {e}")
         
-        # پایش ۱ ثانیه‌ای کاملاً سبک و نیتیو لینوکس
         time.sleep(1)
 
 HTML_TEMPLATE = """
@@ -212,7 +199,7 @@ HTML_TEMPLATE = """
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>⚡ SSH PRO PANEL - NATIVE IPTABLES ⚡</title>
+    <title>⚡ SSH PRO PANEL - UBUNTU 24 ⚡</title>
     <style>
         :root {
             --bg-color: #0f172a;
@@ -248,7 +235,7 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <h1>⚡ پنل هوشمند SSH PRO (سیستم شمارش بایت واقعی لینوکس - Iptables)</h1>
+        <h1>⚡ پنل مدیریت هوشمند SSH PRO (پشتیبانی کامل از اوبونتو ۲۴.۰۴)</h1>
         
         {% with messages = get_flashed_messages() %}
           {% if messages %}
@@ -283,14 +270,14 @@ HTML_TEMPLATE = """
             </form>
         </div>
 
-        <h2>👥 مانیتورینگ زنده کاربران (دیتا مستقیماً از فایروال لینوکس)</h2>
+        <h2>👥 مانیتورینگ زنده کاربران</h2>
         <table>
             <thead>
                 <tr>
                     <th>نام کاربری</th>
                     <th>کلمه عبور</th>
                     <th>حجم مجاز اولیه</th>
-                    <th>حجم مصرفی واقعی بر حسب GB</th>
+                    <th>حجم مصرفی واقعی (GB)</th>
                     <th>روزهای باقی‌مانده</th>
                     <th>وضعیت اتصال</th>
                     <th>وضعیت سیستم</th>
@@ -417,7 +404,6 @@ def edit_user():
         add_days = int(request.form['add_days'].strip())
         expire_date = (datetime.datetime.now() + datetime.timedelta(days=add_days)).strftime("%Y-%m-%d")
         
-        # در صورت ادیت یا تمدید، شمارنده بایت فایروال لینوکس صفر می‌شود تا محاسبه جدید درست پیش برود
         subprocess.run(f"sudo iptables -Z SSH_{username} 2>/dev/null || true", shell=True)
         
         conn = sqlite3.connect(DB_FILE)
@@ -435,7 +421,6 @@ def edit_user():
 @app.route('/renew/<username>')
 def renew_user(username):
     try:
-        # صفر کردن آمار بایت فایروال لینوکس برای دوره جدید کاربر
         subprocess.run(f"sudo iptables -Z SSH_{username} 2>/dev/null || true", shell=True)
         
         conn = sqlite3.connect(DB_FILE)
@@ -458,7 +443,6 @@ def renew_user(username):
 def delete_user(username):
     try:
         subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        # پاک کردن رول‌های فایروال متصل به این کاربر
         subprocess.run(f"sudo iptables -D OUTPUT -m owner --uid-owner {username} -j SSH_{username} 2>/dev/null || true", shell=True)
         subprocess.run(f"sudo iptables -F SSH_{username} 2>/dev/null || true", shell=True)
         subprocess.run(f"sudo iptables -X SSH_{username} 2>/dev/null || true", shell=True)
@@ -542,6 +526,9 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
 EOF
 
+    # هماهنگ‌سازی مدیریت سیستم سرویس‌دهی اوبونتو ۲۴.۰۴ (تغییر از sshd به ssh)
+    sudo systemctl restart ssh 2>/dev/null || sudo systemctl restart sshd 2>/dev/null
+
     sudo tee /etc/systemd/system/custom-panel.service > /dev/null <<EOF
 [Unit]
 Description=SSH Advanced GUI Dark Panel Ultimate
@@ -566,6 +553,6 @@ install_prerequisites
 create_panel_app
 
 echo -e "\e[1;32m==================================================\e[0m"
-echo -e "\e[1;32m✔ SUCCESS: 100% HARDWARE LEVEL TRAFFIC COUNTER!   \e[0m"
+echo -e "\e[1;32m✔ SUCCESS: LIVE PATCH FOR UBUNTU 24.04 EXECUTED! \e[0m"
 echo -e "\e[1;36m🌐 WEB PANEL RE-LAUNCHED AND LIVE ON PORT 5000     \e[0m"
 echo -e "\e[1;32m==================================================\e[0m"
