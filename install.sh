@@ -1,30 +1,30 @@
 #!/bin/bash
 
-# غیرفعال کردن خروج اضطراری جهت تضمین عدم کرش
+# غیرفعال کردن خروج اضطراری
 set +e
 
 clear
-echo -e "\e[1;33m[*] Fixing Jinja2/Javascript Escape Crash & Speed Optimization...\e[0m"
+echo -e "\e[1;33m[*] Implementing Isolated Micro-APIs & Async Frontend Rendering...\e[0m"
 
 # آزاد کردن قفل‌های سیستم‌عامل
 sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/cache/apt/archives/lock 2>/dev/null
 sudo dpkg --configure -a 2>/dev/null
 
 echo -e "\e[1;34m==================================================\e[0m"
-echo -e "\e[1;36m         SSH PRO PANEL (BUG FREE SPEED FIX)       \e[0m"
+echo -e "\e[1;36m         SSH PRO PANEL (ASYNCHRONOUS ENGINE)      \e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
 
 DB_FILE="/etc/custom-panel/panel.db"
 WEB_PANEL_PORT=5000
 
 update_and_replace_logic() {
-    echo "[*] Ensuring port 5000 is clean..."
+    echo "[*] Cleaning existing instances on port 5000..."
     sudo fuser -k $WEB_PANEL_PORT/tcp 2>/dev/null
     sudo mkdir -p /etc/custom-panel
 }
 
 install_prerequisites() {
-    echo "[*] Reviewing server packages..."
+    echo "[*] Upgrading critical components..."
     set -e
     sudo apt update -y
     sudo apt install -y openssh-server python3 python3-pip python3-flask ufw sqlite3 bc psmisc net-tools
@@ -32,20 +32,20 @@ install_prerequisites() {
 }
 
 create_panel_app() {
-    echo "[*] Injecting Isolated Web Panel Core..."
+    echo "[*] Injecting Multi-Threaded Isolated App Architecture..."
     sudo tee /etc/custom-panel/app.py > /dev/null << 'EOF'
 import os, subprocess, datetime, sqlite3, json, time, threading, pwd
 from flask import Flask, request, render_template_string, redirect, send_file, jsonify, flash
 
 app = Flask(__name__)
-app.secret_key = "ssh_pro_glass_premium_key_v8"
+app.secret_key = "ssh_pro_glass_premium_key_v9"
 DB_FILE = "/etc/custom-panel/panel.db"
 TRAFFIC_TRACKER = {}
 
 db_lock = threading.Lock()
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_FILE, timeout=30.0, check_same_thread=False)
+    conn = sqlite3.connect(DB_FILE, timeout=20.0, check_same_thread=False)
     conn.execute('PRAGMA journal_mode=WAL;')
     return conn
 
@@ -83,13 +83,12 @@ def get_server_offset():
             cursor.execute("SELECT value FROM settings WHERE key='server_traffic_offset'")
             row = cursor.fetchone()
             conn.close()
-            if row:
-                return float(row[0])
+            if row: return float(row[0])
     except:
         pass
     return 0.0
 
-def get_system_stats():
+def get_system_stats_isolated():
     cpu = 0
     ram = 0
     try:
@@ -98,10 +97,8 @@ def get_system_stats():
         mem_total = 1
         mem_available = 1
         for line in lines:
-            if "MemTotal" in line:
-                mem_total = int(line.split()[1])
-            if "MemAvailable" in line:
-                mem_available = int(line.split()[1])
+            if "MemTotal" in line: mem_total = int(line.split()[1])
+            if "MemAvailable" in line: mem_available = int(line.split()[1])
         ram = int(((mem_total - mem_available) / mem_total) * 100)
         
         with open('/proc/stat', 'r') as f:
@@ -110,7 +107,7 @@ def get_system_stats():
         idle_before = parts[3]
         total_before = sum(parts)
         
-        time.sleep(0.1)
+        time.sleep(0.05) # وقفه بسیار کوتاه غیرمسدودکننده
         
         with open('/proc/stat', 'r') as f:
             line = f.readline()
@@ -126,7 +123,7 @@ def get_system_stats():
         pass
     return {"cpu": max(0, min(100, cpu)), "ram": max(0, min(100, ram))}
 
-def get_sshd_connections():
+def get_sshd_connections_isolated():
     connections = {}
     try:
         output = subprocess.check_output("ps -eo user,pid,command | grep -E 'sshd:|ssh:'", shell=True).decode()
@@ -136,26 +133,21 @@ def get_sshd_connections():
                 user = parts[0].strip()
                 pid = parts[1].strip()
                 if user not in ['root', 'sshd', 'nobody', 'ssh'] and 'net' not in user:
-                    if user not in connections:
-                        connections[user] = []
+                    if user not in connections: connections[user] = []
                     connections[user].append(pid)
     except:
         pass
     return connections
 
-def get_online_users():
-    return list(get_sshd_connections().keys())
-
 def update_traffic_from_proc():
     global TRAFFIC_TRACKER
     while True:
         try:
-            active_connections = get_sshd_connections()
+            active_connections = get_sshd_connections_isolated()
             if active_connections:
                 with db_lock:
                     conn = get_db_connection()
                     cursor = conn.cursor()
-                    
                     for username, pids in active_connections.items():
                         for pid in pids:
                             net_file = f"/proc/{pid}/net/dev"
@@ -177,14 +169,13 @@ def update_traffic_from_proc():
                                     if diff > 0:
                                         diff_gb = diff / (1024.0 * 1024.0 * 1024.0)
                                         cursor.execute("UPDATE users SET used_gb = used_gb + ? WHERE username = ?", (diff_gb, username))
-                                    
                                     TRAFFIC_TRACKER[username]["last_bytes"] = bytes_sum
                                 except:
                                     pass
                     conn.commit()
                     conn.close()
         except Exception as e:
-            print(f"Error in traffic monitoring: {e}")
+            print(f"Traffic background error: {e}")
         time.sleep(2)
 
 def monitor_core_logic():
@@ -212,7 +203,7 @@ def monitor_core_logic():
                         cursor.execute("UPDATE users SET status='Traffic_Limit' WHERE username=?", (username,))
                         subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-                active_connections = get_sshd_connections()
+                active_connections = get_sshd_connections_isolated()
                 for username, pids in active_connections.items():
                     if len(pids) > 1:
                         for extra_pid in pids[1:]:
@@ -221,8 +212,8 @@ def monitor_core_logic():
                 conn.commit()
                 conn.close()
         except Exception as e:
-            print(f"Error in core monitoring logic: {e}")
-        time.sleep(2)
+            print(f"Core logic error: {e}")
+        time.sleep(3)
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -249,7 +240,7 @@ HTML_TEMPLATE = """
             color: var(--text-main); 
             margin: 0; 
             padding: 40px 20px; 
-            direction: rtl; 
+            direction: rti; 
             -webkit-font-smoothing: antialiased;
         }
         
@@ -295,11 +286,6 @@ HTML_TEMPLATE = """
             font-weight: 700;
             font-size: 14px;
         }
-        input:focus { 
-            background: rgba(255, 255, 255, 0.12);
-            border-color: var(--accent-blue); 
-            outline: none; 
-        }
         
         button { 
             padding: 12px 24px; 
@@ -317,7 +303,6 @@ HTML_TEMPLATE = """
         .btn-green { background: var(--accent-green); font-weight: 900; } 
         .btn-red { background: var(--accent-red); font-weight: 900; }
         .btn-reset-traffic { background: rgba(255, 59, 48, 0.2); border: 1px solid var(--accent-red); color: #fff; margin-top: 10px; padding: 6px 12px; font-size: 12px; border-radius: 8px; cursor: pointer; font-family: 'Vazirmatn'; font-weight: 900; }
-        .btn-reset-traffic:hover { background: var(--accent-red); }
 
         .search-container {
             margin-bottom: 20px;
@@ -327,11 +312,7 @@ HTML_TEMPLATE = """
             padding: 4px;
             border: 1px solid rgba(255, 255, 255, 0.05);
         }
-        .search-container input {
-            background: transparent;
-            border: none;
-            padding: 14px;
-        }
+        .search-container input { background: transparent; border: none; padding: 14px; }
 
         table { width: 100%; border-collapse: collapse; margin-top: 15px; background: rgba(15, 23, 42, 0.3); border-radius: 16px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.05); }
         th, td { padding: 16px; text-align: center; font-size: 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.05); font-weight: 700; }
@@ -456,135 +437,110 @@ HTML_TEMPLATE = """
             const filter = input.value.toLowerCase();
             const tbody = document.getElementById('user-table-body');
             const trs = tbody.getElementsByTagName('tr');
-
             for (let i = 0; i < trs.length; i++) {
                 const tdUsername = trs[i].getElementsByTagName('td')[0];
                 if (tdUsername) {
                     const txtValue = tdUsername.textContent || tdUsername.innerText;
-                    if (txtValue.toLowerCase().indexOf(filter) > -1) {
-                        trs[i].style.display = "";
-                    } else {
-                        trs[i].style.display = "none";
-                    }
+                    trs[i].style.display = txtValue.toLowerCase().includes(filter) ? "" : "none";
                 }
             }
         }
 
-        async function fetchLiveStatus() {
+        // کامپوننت ۱: دریافت و رندر سیستم استتس (هر ۲ ثانیه)
+        async function fetchSystemStats() {
             try {
-                const response = await fetch('/api/live_data');
-                const data = await response.json();
-                
-                if(!data) return;
-
-                if(data.system_stats) {
-                    const ramUsage = data.system_stats.ram || 0;
-                    const cpuUsage = data.system_stats.cpu || 0;
-                    
-                    document.getElementById('ram-text').textContent = ramUsage + '%';
-                    document.getElementById('ram-circle').style.strokeDasharray = ramUsage + ', 100';
-                    
-                    document.getElementById('cpu-text').textContent = cpuUsage + '%';
-                    document.getElementById('cpu-circle').style.strokeDasharray = cpuUsage + ', 100';
+                const res = await fetch('/api/sys_stats');
+                const data = await res.json();
+                if(data) {
+                    document.getElementById('ram-text').textContent = data.ram + '%';
+                    document.getElementById('ram-circle').style.strokeDasharray = data.ram + ', 100';
+                    document.getElementById('cpu-text').textContent = data.cpu + '%';
+                    document.getElementById('cpu-circle').style.strokeDasharray = data.cpu + ', 100';
                 }
+            } catch(e) { console.error("Error on sys API:", e); }
+        }
 
-                if(data.users) {
-                    let totalServerUsed = 0;
-                    data.users.forEach(u => {
-                        totalServerUsed += parseFloat(u.used_gb) || 0;
-                    });
-                    let finalCounterValue = totalServerUsed - (parseFloat(data.offset) || 0);
-                    if (finalCounterValue < 0) finalCounterValue = 0;
-                    
-                    document.getElementById('total-server-traffic').innerHTML = finalCounterValue.toFixed(3) + ' <span style="font-size:14px;">GB</span>';
-                }
+        // کامپوننت ۲: دریافت و رندر تفکیک‌شده کاربران با وقفه مانیتورینگ (هر ۴ ثانیه)
+        async function fetchUsersData() {
+            try {
+                const res = await fetch('/api/users_data');
+                const data = await res.json();
+                if(!data || !data.users) return;
+
+                // محاسبه فیلد ترافیک سرور به همراه آفست مستقل
+                let totalServerUsed = 0;
+                data.users.forEach(u => { totalServerUsed += parseFloat(u.used_gb) || 0; });
+                let finalCounterValue = totalServerUsed - (parseFloat(data.offset) || 0);
+                if (finalCounterValue < 0) finalCounterValue = 0;
+                document.getElementById('total-server-traffic').innerHTML = finalCounterValue.toFixed(3) + ' <span style="font-size:14px;">GB</span>';
 
                 const tbody = document.getElementById('user-table-body');
-                const searchInputElement = document.getElementById('search-input');
-                const searchInput = searchInputElement ? searchInputElement.value.toLowerCase() : "";
-
                 tbody.innerHTML = '';
 
-                if(data.users) {
-                    data.users.forEach(user => {
-                        try {
-                            const isOnline = data.online_users.map(u => u.trim().toLowerCase()).includes(user.username.trim().toLowerCase());
-                            const onlineBadge = isOnline 
-                                ? '<span class="badge online">● آنلاین</span>' 
-                                : '<span class="badge offline">○ آفلاین</span>';
-                            
-                            let statusText = '<span style="color:#34c759; font-weight:900;">فعال</span>';
-                            if (user.status === 'Expired') statusText = '<span style="color:#ff3b30; font-weight:900;">منقضی زمان</span>';
-                            if (user.status === 'Traffic_Limit') statusText = '<span style="color:#ffcc00; font-weight:900;">اتمام حجم</span>';
+                data.users.forEach(user => {
+                    const isOnline = data.online_users.map(o => o.trim().toLowerCase()).includes(user.username.trim().toLowerCase());
+                    const onlineBadge = isOnline ? '<span class="badge online">● آنلاین</span>' : '<span class="badge offline">○ آفلاین</span>';
+                    
+                    let statusText = '<span style="color:#34c759; font-weight:900;">فعال</span>';
+                    if (user.status === 'Expired') statusText = '<span style="color:#ff3b30; font-weight:900;">منقضی زمان</span>';
+                    if (user.status === 'Traffic_Limit') statusText = '<span style="color:#ffcc00; font-weight:900;">اتمام حجم</span>';
 
-                            const totalGb = parseFloat(user.limit_gb) || 0;
-                            const usedGb = parseFloat(user.used_gb) || 0;
-                            let remainingGb = totalGb - usedGb;
-                            if (remainingGb < 0) remainingGb = 0;
-                            
-                            let remainingPercent = totalGb > 0 ? (remainingGb / totalGb) * 100 : 0;
-                            if (remainingPercent > 100) remainingPercent = 100;
-                            if (remainingPercent < 0) remainingPercent = 0;
-                            
-                            let barColor = 'var(--accent-green)'; 
-                            if (remainingPercent <= 50 && remainingPercent > 20) {
-                                barColor = 'var(--accent-yellow)'; 
-                            } else if (remainingPercent <= 20) {
-                                barColor = 'var(--accent-red)'; 
-                            }
+                    const totalGb = parseFloat(user.limit_gb) || 0;
+                    const usedGb = parseFloat(user.used_gb) || 0;
+                    let remainingGb = totalGb - usedGb; if (remainingGb < 0) remainingGb = 0;
+                    let remainingPercent = totalGb > 0 ? (remainingGb / totalGb) * 100 : 0;
+                    if (remainingPercent > 100) remainingPercent = 100;
+                    if (remainingPercent < 0) remainingPercent = 0;
 
-                            const tr = document.createElement('tr');
-                            if (searchInput && !user.username.toLowerCase().includes(searchInput)) {
-                                tr.style.display = "none";
-                            }
+                    let barColor = 'var(--accent-green)';
+                    if (remainingPercent <= 50 && remainingPercent > 20) barColor = 'var(--accent-yellow)';
+                    else if (remainingPercent <= 20) barColor = 'var(--accent-red)';
 
-                            let daysText = 'پایان دوره';
-                            if (user.remaining_days !== undefined && user.remaining_days !== null) {
-                                const daysInt = parseInt(user.remaining_days);
-                                if (daysInt > 0) {
-                                    daysText = daysInt + ' روز';
-                                }
-                            }
+                    let daysText = 'پایان دوره';
+                    if (user.remaining_days !== undefined && user.remaining_days !== null) {
+                        const daysInt = parseInt(user.remaining_days);
+                        if (daysInt > 0) daysText = daysInt + ' روز';
+                    }
 
-                            // تفکیک کامل رشته‌ها جهت فرار از تداخل با لینوکس
-                            tr.innerHTML = 'td style="font-weight:900; color:#007aff;"' + '>' + user.username + '</td' + '>' +
-                                '<td' + '><code>' + user.password + '</code></td' + '>' +
-                                '<td style="font-weight:900; color:#fff;"' + '>' + totalGb.toFixed(1) + ' GB</td' + '>' +
-                                '<td' + '><span style="color:#64d2ff; font-weight:900;">' + usedGb.toFixed(3) + '</span> GB</td' + '>';
-                                
-                            let progressHtml = '<td' + '>' +
-                                    '<div class="progress-wrapper">' +
-                                        '<div class="progress-text">' +
-                                            '<span>باقی‌مانده: <b>' + remainingGb.toFixed(2) + ' GB</b></span>' +
-                                            '<span>' + remainingPercent.toFixed(0) + '%</span>' +
-                                        '</div>' +
-                                        '<div class="progress-container">' +
-                                            '<div class="progress-bar" style="width: ' + remainingPercent + '%; background-color: ' + barColor + ';"></div>' +
-                                        '</div>' +
-                                    '</div>' +
-                                '</td' + '>';
-                                
-                            let actionsHtml = '<td style="font-weight: 900; color: #ff3b30;"' + '>' + daysText + '</td' + '>' +
-                                '<td' + '>' + onlineBadge + '</td' + '>' +
-                                '<td' + '>' + statusText + '</td' + '>' +
-                                '<td' + '>' +
-                                    '<a href="/renew/' + user.username + '"><button class="btn-green" style="padding:6px 14px; font-size:12px; border-radius:8px; font-family:\'Vazirmatn\';">🔄 ریست دوره</button></a> ' +
-                                    '<a href="/delete/' + user.username + '"><button class="btn-red" style="padding:6px 14px; font-size:12px; border-radius:8px; font-family:\'Vazirmatn\';">حذف</button></a>' +
-                                '</td' + '>';
-                                
-                            tr.innerHTML = tr.innerHTML + progressHtml + actionsHtml;
-                            tbody.appendChild(tr);
-                        } catch(innerErr) {
-                            console.error(innerErr);
-                        }
-                    });
-                }
-            } catch (error) {
-                console.error(error);
-            }
+                    const tr = document.createElement('tr');
+                    
+                    // رندر امن و کاملاً ایزوله بدون کوچکترین تداخل رشته‌ای لینوکس/پایتون
+                    let baseHtml = '<td style="font-weight:900; color:#007aff;">' + user.username + '</td>' +
+                                   '<td><code>' + user.password + '</code></td>' +
+                                   '<td style="font-weight:900; color:#fff;">' + totalGb.toFixed(1) + ' GB</td>' +
+                                   '<td><span style="color:#64d2ff; font-weight:900;">' + usedGb.toFixed(3) + '</span> GB</td>';
+
+                    let progressHtml = '<td>' +
+                                            '<div class="progress-wrapper">' +
+                                                '<div class="progress-text">' +
+                                                    '<span>باقی‌مانده: <b>' + remainingGb.toFixed(2) + ' GB</b></span>' +
+                                                    '<span>' + remainingPercent.toFixed(0) + '%</span>' +
+                                                '</div>' +
+                                                '<div class="progress-container">' +
+                                                    '<div class="progress-bar" style="width: ' + remainingPercent + '%; background-color: ' + barColor + ';"></div>' +
+                                                '</div>' +
+                                            '</div>' +
+                                       '</td>';
+
+                    let tailHtml = '<td style="font-weight: 900; color: #ff3b30;">' + daysText + '</td>' +
+                                   '<td>' + onlineBadge + '</td>' +
+                                   '<td>' + statusText + '</td>' +
+                                   '<td>' +
+                                       '<a href="/renew/' + user.username + '"><button class="btn-green" style="padding:6px 14px; font-size:12px; border-radius:8px; font-family:\'Vazirmatn\';">🔄 ریست دوره</button></a> ' +
+                                       '<a href="/delete/' + user.username + '"><button class="btn-red" style="padding:6px 14px; font-size:12px; border-radius:8px; font-family:\'Vazirmatn\';">حذف</button></a>' +
+                                   '</td>';
+
+                    tr.innerHTML = baseHtml + progressHtml + tailHtml;
+                    tbody.appendChild(tr);
+                });
+            } catch(e) { console.error("Error on users API:", e); }
         }
-        fetchLiveStatus();
-        setInterval(fetchLiveStatus, 2500);
+
+        // سیستم زمان‌بندی مستقل با وقفه جهت عدم اورلود کلاینت و سرور
+        fetchSystemStats();
+        fetchUsersData();
+        setInterval(fetchSystemStats, 2000); // سیستم استتس هر ۲ ثانیه
+        setInterval(fetchUsersData, 4000);   // کاربران مستقل هر ۴ ثانیه
     </script>
 </body>
 </html>
@@ -594,8 +550,12 @@ HTML_TEMPLATE = """
 def index():
     return render_template_string(HTML_TEMPLATE)
 
-@app.route('/api/live_data')
-def live_data():
+@app.route('/api/sys_stats')
+def sys_stats():
+    return jsonify(get_system_stats_isolated())
+
+@app.route('/api/users_data')
+def users_data():
     try:
         with db_lock:
             conn = get_db_connection()
@@ -621,12 +581,11 @@ def live_data():
             })
         return jsonify({
             "users": users_list, 
-            "online_users": get_online_users(),
-            "system_stats": get_system_stats(),
+            "online_users": list(get_sshd_connections_isolated().keys()),
             "offset": get_server_offset()
         })
     except Exception as e:
-        return jsonify({"users": [], "online_users": [], "system_stats": {"cpu": 0, "ram": 0}, "offset": 0.0, "error": str(e)})
+        return jsonify({"users": [], "online_users": [], "offset": 0.0, "error": str(e)})
 
 @app.route('/reset_counter_only')
 def reset_counter_only():
@@ -637,7 +596,6 @@ def reset_counter_only():
             cursor.execute("SELECT SUM(used_gb) FROM users")
             total_used = cursor.fetchone()[0]
             if not total_used: total_used = 0.0
-            
             cursor.execute("UPDATE settings SET value=? WHERE key='server_traffic_offset'", (str(total_used),))
             conn.commit()
             conn.close()
@@ -714,7 +672,6 @@ def download_backup():
             cursor.execute("SELECT username, password, limit_gb, used_gb, expire_date, status, initial_gb, initial_days FROM users")
             rows = cursor.fetchall()
             conn.close()
-        
         backup_data = []
         for row in rows:
             backup_data.append({
@@ -725,8 +682,7 @@ def download_backup():
         with open(backup_filename, "w") as f:
             json.dump(backup_data, f, indent=4)
         return send_file(backup_filename, as_attachment=True, download_name="ssh_premium_backup.json")
-    except Exception as e:
-        return str(e)
+    except Exception as e: return str(e)
 
 @app.route('/backup/restore', methods=['POST'])
 def restore_backup():
@@ -759,18 +715,15 @@ def restore_backup():
                 ''', (username, password, limit_gb, used_gb, expire_date, status, init_gb, init_days))
             conn.commit()
             conn.close()
-        flash("دیتابیس پشتیبان با متد پایدار اولیه با موفقیت بازگردانی شد.")
-    except Exception as e:
-        flash(f"خطا در ریستور: {str(e)}")
+        flash("دیتابیس پشتیبان با موفقیت بازگردانی شد.")
+    except Exception as e: flash(f"خطا در ریستور: {str(e)}")
     return redirect('/')
 
 def safe_system_user_create(username, password):
     try:
         pwd.getpwnam(username)
         subprocess.run(["sudo", "userdel", "-r", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except KeyError:
-        pass
-        
+    except KeyError: pass
     subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True)
 
@@ -781,7 +734,7 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
 EOF
 
-    echo "[*] Restarting and Aligning Daemon..."
+    echo "[*] Triggering Micro-Services Engine Daemon..."
     sudo systemctl daemon-reload
     sudo systemctl restart custom-panel.service
 }
@@ -791,6 +744,6 @@ install_prerequisites
 create_panel_app
 
 echo -e "\e[1;32m==================================================\e[0m"
-echo -e "\e[1;32m✔ JINJA2 / ESCAPE CONFLICT RESOLVED!              \e[0m"
-echo -e "\e[1;36m🌐 WEB PANEL RE-ACTIVATED ON PORT 5000             \e[0m"
+echo -e "\e[1;32m✔ SUCCESS: COMPLETELY ISOLATED ASYNC ENGINE LOADED \e[0m"
+echo -e "\e[1;36m🌐 SERVER ONLINE ON PORT 5000                      \e[0m"
 echo -e "\e[1;32m==================================================\e[0m"
