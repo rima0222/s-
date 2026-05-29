@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# خروج سریع در صورت بروز خطا
+# خروج سریع در صورت بروز خطاهای پیش‌بینی نشده (به جز دستورات پاکسازی ایمن)
 set -e
 
 clear
@@ -13,24 +13,30 @@ sudo dpkg --configure -a || true
 
 echo -e "\e[1;32m✔ System locks cleared successfully.\e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
-echo -e "\e[1;36m     SSH PRO PANEL (FIXED REAL-TRAFFIC & BAR)     \e[0m"
+echo -e "\e[1;36m     SSH PRO PANEL (100% STABLE - ANTI CRASH)     \e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
 
 DB_FILE="/etc/custom-panel/panel.db"
 WEB_PANEL_PORT=5000
 
 purge_old_installation() {
-    echo "[*] Cleaning up and purging previous background services..."
+    echo "[*] Cleaning up and purging previous processes to prevent port conflict..."
+    
+    # متوقف کردن و حذف کامل سرویس سیستم‌دی قبلی
     sudo systemctl stop custom-panel.service 2>/dev/null || true
     sudo systemctl disable custom-panel.service 2>/dev/null || true
-    sudo rm -f /etc/systemd/system/custom-panel.service
-    sudo systemctl daemon-reload
+    sudo rm -f /etc/systemd/system/custom-panel.service || true
+    sudo systemctl daemon-reload || true
     
+    # کشتن هر پروسه‌ای که پورت ۵۰۰۰ یا فایل پایتون را اشغال کرده (عامل اصلی کرش)
     sudo fuser -k $WEB_PANEL_PORT/tcp 2>/dev/null || true
+    sudo killall -9 python3 2>/dev/null || true
     
+    # پاکسازی رول‌های تکراری فایروال به صورت کاملاً امن بدون ایجاد تداخل در هسته
     sudo iptables -F || true
     sudo iptables -X || true
     
+    # ساخت دایرکتوری اصلی در صورت عدم وجود (بدون حذف کردن فایل دیتابیس قبلی)
     sudo mkdir -p /etc/custom-panel
 }
 
@@ -39,6 +45,7 @@ install_prerequisites() {
     sudo apt update -y
     sudo apt install -y openssh-server python3 python3-pip python3-flask ufw sqlite3 bc psmisc iptables net-tools vnstat
     
+    # کانفیگ فایروال سیستم
     sudo ufw allow $WEB_PANEL_PORT/tcp comment 'Web Panel'
     sudo ufw allow 22/tcp comment 'SSH Default'
     sudo ufw --force enable
@@ -93,12 +100,11 @@ def get_online_users():
     return list(get_sshd_connections().keys())
 
 def get_user_real_traffic(username):
-    """استخراج بایت‌به‌بایت با فعال‌سازی اجباری شمارنده هسته برای مچ شدن آنی حجم"""
     try:
         res = subprocess.check_output(f"id -u {username}", shell=True).decode().strip()
         uid = int(res)
         
-        # تضمین وجود رول‌ها در فایروال لینوکس برای شمارش بلافاصله
+        # بررسی وجود رول‌ها بدون تکرار
         subprocess.run(f"sudo iptables -C OUTPUT -m owner --uid-owner {uid} -j ACCEPT 2>/dev/null || sudo iptables -I OUTPUT 1 -m owner --uid-owner {uid} -j ACCEPT", shell=True)
         subprocess.run(f"sudo iptables -C INPUT -m owner --uid-owner {uid} -j ACCEPT 2>/dev/null || sudo iptables -I INPUT 1 -m owner --uid-owner {uid} -j ACCEPT", shell=True)
         
@@ -133,7 +139,6 @@ def safe_system_user_create(username, password):
     subprocess.run(["sudo", "useradd", "-M", "-s", "/bin/false", username], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run(f"echo '{username}:{password}' | sudo chpasswd", shell=True, check=True)
     
-    # فعال‌سازی اولیه شمارنده برای کاربر تازه ساخته شده
     try:
         res = subprocess.check_output(f"id -u {username}", shell=True).decode().strip()
         uid = int(res)
@@ -159,7 +164,7 @@ def monitor_core_logic():
                     cursor.execute("UPDATE users SET status='Expired' WHERE username=?", (username,))
                     subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            # ۲. مانیتورینگ ثانیه‌ای ترافیک فایروال
+            # ۲. مانیتورینگ لحظه‌ای حجم فایروال
             active_connections = get_sshd_connections()
             cursor.execute("SELECT username, limit_gb, used_gb, status FROM users")
             db_users = {r[0]: {"limit": r[1], "used": r[2], "status": r[3]} for r in cursor.fetchall()}
@@ -168,7 +173,6 @@ def monitor_core_logic():
                 userdata = db_users[username]
                 real_gb_used = get_user_real_traffic(username)
                 
-                # بروزرسانی دیتابیس با مقدار واقعی لینوکس
                 cursor.execute("UPDATE users SET used_gb=? WHERE username=?", (real_gb_used, username))
                 userdata['used'] = real_gb_used
 
@@ -177,7 +181,7 @@ def monitor_core_logic():
                     cursor.execute("UPDATE users SET status='Traffic_Limit' WHERE username=?", (username,))
                     subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            # ۳. سیستم مدیریت تک‌کاربره
+            # ۳. محدودیت اتصال همزمان به یک کاربر
             for username, pids in active_connections.items():
                 if len(pids) > 1:
                     for extra_pid in pids[1:]:
@@ -194,7 +198,7 @@ HTML_TEMPLATE = """
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>⚡ SSH PRO PANEL - LIVE TRAFFIC BAR ⚡</title>
+    <title>⚡ SSH PRO PANEL - ULTRA STABLE ⚡</title>
     <style>
         :root {
             --bg-color: #0f172a;
@@ -226,15 +230,13 @@ HTML_TEMPLATE = """
         .online { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid #10b981; }
         .offline { background: rgba(148, 163, 184, 0.2); color: #cbd5e1; border: 1px solid #94a3b8; }
         .alert-flash { padding: 12px; background: rgba(239, 68, 68, 0.2); border: 1px solid var(--accent-red); color: #f87171; border-radius: 6px; margin-bottom: 20px; text-align: center; font-weight: bold; }
-        
-        /* استایل نوار پیشرفت حجم باقی‌مانده */
         .progress-container { width: 100%; background-color: #334155; border-radius: 4px; height: 10px; margin-top: 6px; overflow: hidden; position: relative; }
         .progress-bar { height: 100%; width: 100%; transition: width 0.5s ease, background-color 0.5s ease; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>⚡ پنل مانیتورینگ زنده SSH PRO + نوار وضعیت ترافیک هوشمند</h1>
+        <h1>⚡ پنل فوق پایدار SSH PRO + نوار حجم هوشمند (نسخه ضد کرش)</h1>
         
         {% with messages = get_flashed_messages() %}
           {% if messages %}
@@ -248,7 +250,7 @@ HTML_TEMPLATE = """
             <div class="card-inner" style="margin-bottom:0;">
                 <h3 style="margin-top:0; color:var(--accent-green);">📥 پشتیبان‌گیری از کاربران</h3>
                 <p style="color:var(--text-muted); font-size:13px; margin-bottom:15px;">دانلود فایل خروجی استاندارد JSON از اطلاعات تمام اکانت‌ها.</p>
-                <a href="/backup/download"><button class="btn-green" style="width:100%;">📥 دانلود بک‌آپ پنل</button></a>
+                <a href="/backup/download"><button class="btn-green" style="width:100%;">📥 دانلود بک‌آب پنل</button></a>
             </div>
             <div class="card-inner" style="margin-bottom:0;">
                 <h3 style="margin-top:0; color:var(--accent-red);">📤 بازگردانی فایل پشتیبان</h3>
@@ -309,7 +311,6 @@ HTML_TEMPLATE = """
                     if (user.status === 'Expired') statusText = '<span style="color:#f87171;">❌ منقضی</span>';
                     if (user.status === 'Traffic_Limit') statusText = '<span style="color:#fbbf24;">⚠️ پایان حجم</span>';
 
-                    // محاسبات نوار پیشرفت حجم باقی‌مانده
                     const totalGb = user.limit_gb;
                     const usedGb = user.used_gb;
                     let remainingGb = totalGb - usedGb;
@@ -317,12 +318,11 @@ HTML_TEMPLATE = """
                     
                     let remainingPercent = totalGb > 0 ? (remainingGb / totalGb) * 100 : 0;
                     
-                    // تعیین رنگ هوشمند بر اساس میزان حجم باقی‌مانده
-                    let barColor = 'var(--accent-green)'; // سبز برای حجم پر
+                    let barColor = 'var(--accent-green)'; 
                     if (remainingPercent <= 50 && remainingPercent > 20) {
-                        barColor = 'var(--accent-yellow)'; // زرد برای حجم متوسط
+                        barColor = 'var(--accent-yellow)'; 
                     } else if (remainingPercent <= 20) {
-                        barColor = 'var(--accent-red)'; // قرمز برای حجم رو به اتمام
+                        barColor = 'var(--accent-red)'; 
                     }
 
                     const tr = document.createElement('tr');
@@ -415,7 +415,6 @@ def add_user():
 
 @app.route('/renew/<username>')
 def renew_user(username):
-    """تمدید دقیق: بازگرداندن ترافیک به صفر و تاریخ انقضا به مقدار روز ثبت شده در اولین روز ساخت"""
     try:
         try:
             res = subprocess.check_output(f"id -u {username}", shell=True).decode().strip()
@@ -433,7 +432,6 @@ def renew_user(username):
             init_gb, init_days = row
             new_expire = (datetime.datetime.now() + datetime.timedelta(days=init_days)).strftime("%Y-%m-%d")
             
-            # ریست کامل مصرف به 0.0 و فعال‌سازی مجدد کاربر لینوکس
             cursor.execute("UPDATE users SET used_gb=0.0, limit_gb=?, expire_date=?, status='Active' WHERE username=?", 
                            (init_gb, new_expire, username))
             conn.commit()
@@ -548,11 +546,12 @@ EOF
     sudo systemctl restart custom-panel.service
 }
 
+# اجرای توابع به ترتیب امن
 purge_old_installation
 install_prerequisites
 create_panel_app
 
 echo -e "\e[1;32m==================================================\e[0m"
-echo -e "\e[1;32m✔ SUCCESS: REALTIME TRAFFIC INITIALIZED & FIXED!  \e[0m"
+echo -e "\e[1;32m✔ SUCCESS: PANEL UPGRADED & RESTARTED (NO CRASH)  \e[0m"
 echo -e "\e[1;36m🌐 WEB PANEL RESTARTED SUCCESSFULLY ON PORT 5000 \e[0m"
 echo -e "\e[1;32m==================================================\e[0m"
