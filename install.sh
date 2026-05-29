@@ -5,11 +5,11 @@ set -e
 
 clear
 echo "=================================================="
-echo "   SSH Tunnel + CUSTOM WEB GUI + Anti-Filter WS   "
+echo "    SSH Tunnel + WEB GUI (Direct GOST WS Mode)    "
 echo "=================================================="
 echo "Please select the role of this server:"
 echo "1) Server KHAREJ (Main + Custom Web GUI Panel)"
-echo "2) Server IRAN (Tunnel + WS Server for Npv)"
+echo "2) Server IRAN (Direct GOST WS Tunnel)"
 echo "=================================================="
 read -p "Enter your choice (1 or 2): " SERVER_ROLE
 
@@ -17,8 +17,7 @@ read -p "Enter your choice (1 or 2): " SERVER_ROLE
 echo ""
 echo "[*] Updating system and installing prerequisites..."
 sudo apt update && sudo apt install -y curl wget unzip python3 python3-pip ufw bc python3-flask
-echo "[*] Waiting 3 seconds for packages to fully settle..."
-sleep 3
+sleep 2
 
 # ۲. دانلود و نصب ابزار GOST
 if [ ! -f /usr/local/bin/gost ]; then
@@ -27,12 +26,11 @@ if [ ! -f /usr/local/bin/gost ]; then
     gunzip gost-linux-amd64-2.11.5.gz
     chmod +x gost-linux-amd64-2.11.5
     sudo mv gost-linux-amd64-2.11.5 /usr/local/bin/gost
-    sleep 3
+    sleep 2
 fi
 
 TUNNEL_PORT=8443
 LOCAL_SSH_PORT=22
-IRAN_ENTRY_PORT=443
 WS_PORT=80
 WEB_PANEL_PORT=5000
 
@@ -44,10 +42,9 @@ if [ "$SERVER_ROLE" == "1" ]; then
     
     sudo ufw allow $TUNNEL_PORT/tcp comment 'GOST Tunnel'
     sudo ufw allow $WEB_PANEL_PORT/tcp comment 'Custom Web GUI'
-    sudo ufw allow 5000/tcp
     sudo ufw reload
     
-    # ساخت سرویس GOST برای خارج
+    # ساخت سرویس GOST برای خارج (پذیرش وب‌ساکت مستقیم)
     sudo tee /etc/systemd/system/gost-tunnel.service > /dev/null <<EOF
 [Unit]
 Description=Gost Tunnel Server on Kharej
@@ -55,7 +52,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/gost -L rtcp://:$TUNNEL_PORT/127.0.0.1:$LOCAL_SSH_PORT
+ExecStart=/usr/local/bin/gost -L mws://:$TUNNEL_PORT/127.0.0.1:$LOCAL_SSH_PORT
 Restart=always
 RestartSec=5
 
@@ -112,7 +109,6 @@ HTML_TEMPLATE = """
                 <th>نام کاربری</th>
                 <th>محدودیت حجم</th>
                 <th>مدت اعتبار</th>
-                <th>محدودیت کاربر</th>
                 <th>عملیات</th>
             </tr>
             {% for user in users %}
@@ -120,7 +116,6 @@ HTML_TEMPLATE = """
                 <td>{{ user[0] }}</td>
                 <td>{{ user[1] }} GB</td>
                 <td>{{ user[2] }} روز</td>
-                <td>تک کاربره (1 IP)</td>
                 <td>
                     <form action="/delete" method="POST" style="margin:0;">
                         <input type="hidden" name="username" value="{{ user[0] }}">
@@ -191,124 +186,47 @@ Restart=always
 WantedBy=multi-user.target
 EOF
 
-    sudo systemctl daemon-reload
-    sudo systemctl enable custom-panel.service
-    sudo systemctl start custom-panel.service
+    sudo systemctl daemon-reload && sudo systemctl enable custom-panel.service && sudo systemctl start custom-panel.service
     
-    sudo tee /etc/custom-panel/kill-multi.sh > /dev/null << 'EOF'
-#!/bin/bash
-while true; do
-    if [ -f /etc/custom-panel/users.db ]; then
-        for user in $(awk -F: '{print $1}' /etc/custom-panel/users.db); do
-            pids=$(ps -u $user -o pid= || true)
-            count=$(echo "$pids" | wc -w)
-            if [ "$count" -gt 1 ]; then
-                kill -9 $(echo "$pids" | awk '{print $1}')
-            fi
-        done
-    fi
-    sleep 5
-done
-EOF
-    sudo chmod +x /etc/custom-panel/kill-multi.sh
-    
-    sudo tee /etc/systemd/system/ssh-kill-multi.service > /dev/null <<EOF
-[Unit]
-Description=Kill Multi Login SSH
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/bin/bash /etc/custom-panel/kill-multi.sh
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    sudo systemctl daemon-reload
-    sudo systemctl enable ssh-kill-multi.service && sudo systemctl start ssh-kill-multi.service
-
     echo "=================================================="
     echo "✔ Server KHAREJ Custom Panel Ready!"
-    echo "🌐 Access GUI via: http://YOUR_KHAREJ_IP:5000"
     echo "=================================================="
 
 # ==================================================
-# تنظیمات سرور ایران (اصلاح شده و قطعی)
+# تنظیمات سرور ایران (مستقیم با وب‌ساکت GOST)
 # ==================================================
 elif [ "$SERVER_ROLE" == "2" ]; then
     echo "[*] Configuring Server IRAN..."
     read -p "Enter Server KHAREJ IP address: " KHAREJ_IP
     
-    sudo ufw allow $IRAN_ENTRY_PORT/tcp
+    # حذف سرویس قدیمی پایتون اگر وجود داشته باشد
+    sudo systemctl stop ssh-ws.service 2>/dev/null || true
+    sudo systemctl disable ssh-ws.service 2>/dev/null || true
+    sudo rm -f /etc/systemd/system/ssh-ws.service
+    
     sudo ufw allow $WS_PORT/tcp
     sudo ufw reload
 
+    # ایجاد تونل مستقیم وب‌ساکت روی پورت ۸۰ ایران به خارج
     sudo tee /etc/systemd/system/gost-tunnel.service > /dev/null <<EOF
 [Unit]
-Description=Gost Tunnel Client on Iran
+Description=Gost Direct WS Tunnel on Iran
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/gost -L tcp://:$IRAN_ENTRY_PORT -F rtcp://$KHAREJ_IP:$TUNNEL_PORT
+ExecStart=/usr/local/bin/gost -L tcp://:$WS_PORT -F mws://$KHAREJ_IP:$TUNNEL_PORT?path=/ws
 Restart=always
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
 EOF
-    sudo systemctl daemon-reload && sudo systemctl enable gost-tunnel.service && sudo systemctl start gost-tunnel.service
-
-    echo "[*] Creating WebSocket Python Proxy..."
-    sudo mkdir -p /etc/ssh-ws
-    
-    sudo tee /etc/ssh-ws/ws-proxy.py > /dev/null << 'EOF'
-import socket, threading
-def handle_client(client_socket):
-    try:
-        request = client_socket.recv(1024).decode('utf-8', errors='ignore')
-        if "Upgrade: websocket" in request or "HTTP/1.1" in request:
-            client_socket.sendall(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n")
-            server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            server_socket.connect(('127.0.0.1', 443))
-            def forward(src, dst):
-                try:
-                    while True:
-                        data = src.recv(4096)
-                        if not data: break
-                        dst.sendall(data)
-                except: pass
-                finally: src.close(); dst.close()
-            threading.Thread(target=forward, args=(client_socket, server_socket)).start()
-            threading.Thread(target=forward, args=(server_socket, client_socket)).start()
-        else:
-            client_socket.close()
-    except: client_socket.close()
-server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-server.bind(('0.0.0.0', 80))
-server.listen(100)
-while True:
-    client, addr = server.accept()
-    threading.Thread(target=handle_client, args=(client,)).start()
-EOF
-
-    sudo tee /etc/systemd/system/ssh-ws.service > /dev/null <<EOF
-[Unit]
-Description=SSH WebSocket Proxy for Npv
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/python3 /etc/ssh-ws/ws-proxy.py
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    sudo systemctl daemon-reload && sudo systemctl enable ssh-ws.service && sudo systemctl start ssh-ws.service
+    sudo systemctl daemon-reload
+    sudo systemctl enable gost-tunnel.service
+    sudo systemctl restart gost-tunnel.service
     
     echo "=================================================="
-    echo "✔ Server IRAN Ready!"
+    echo "✔ Server IRAN Ready (Direct WS Mode)!"
     echo "=================================================="
 fi
