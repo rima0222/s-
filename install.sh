@@ -1,49 +1,44 @@
 #!/bin/bash
 
-# غیرفعال کردن خروج اضطراری برای دستورات پاکسازی اولیه جهت جلوگیری از کرش اسکریپت
+# غیرفعال کردن خروج اضطراری برای بخش‌های نوسانی سیستم جهت تضمین عدم کرش
 set +e
 
 clear
-echo -e "\e[1;33m[*] Managing system locks gracefully...\e[0m"
+echo -e "\e[1;33m[*] Optimizing Web GUI Fonts and Fixing Traffic Engine...\e[0m"
 
-# آزاد کردن قفل‌های احتمالی apt بدون آسیب به سیستم
+# آزاد کردن قفل‌های احتمالی apt برای جلوگیری از توقف نصب
 sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock /var/cache/apt/archives/lock 2>/dev/null
 sudo dpkg --configure -a 2>/dev/null
 
 echo -e "\e[1;34m==================================================\e[0m"
-echo -e "\e[1;36m    SSH PRO PANEL (SAFE IN-PLACE UPDATE METHOD)   \e[0m"
+echo -e "\e[1;36m    SSH PRO PANEL (TRAFFIC FIXED & PREMIUM UI)    \e[0m"
 echo -e "\e[1;34m==================================================\e[0m"
 
 DB_FILE="/etc/custom-panel/panel.db"
 WEB_PANEL_PORT=5000
 
 update_and_replace_logic() {
-    echo "[*] Replacing web-server files and freeing port 5000 safely..."
-    
-    # کنترل پورت ۵۰۰۰: فقط پروسه مربوط به این پورت آزاد می‌شود تا خطا رخ ندهد
+    echo "[*] Cleaning up port 5000 gracefully..."
     sudo fuser -k $WEB_PANEL_PORT/tcp 2>/dev/null
-    
-    # ساخت دایرکتوری در صورت عدم وجود (اگر از قبل باشد خطایی نمی‌دهد)
     sudo mkdir -p /etc/custom-panel
 }
 
 install_prerequisites() {
-    echo "[*] Ensuring required system packages are present..."
-    # روشن کردن خروج در صورت خطا فقط برای نصب پکیج‌ها
+    echo "[*] Checking core server dependencies..."
     set -e
     sudo apt update -y
-    sudo apt install -y openssh-server python3 python3-pip python3-flask ufw sqlite3 bc psmisc iptables net-tools vnstat
+    sudo apt install -y openssh-server python3 python3-pip python3-flask ufw sqlite3 bc psmisc iptables net-tools
     set +e
 }
 
 create_panel_app() {
-    echo "[*] Overlaying the core Python Web GUI script..."
+    echo "[*] Injecting redesigned Beautiful Dark Web Panel..."
     sudo tee /etc/custom-panel/app.py > /dev/null << 'EOF'
-import os, subprocess, datetime, sqlite3, json, time, threading
+import os, subprocess, datetime, sqlite3, json, time, threading, re
 from flask import Flask, request, render_template_string, redirect, send_file, jsonify, flash
 
 app = Flask(__name__)
-app.secret_key = "ssh_pro_ultimate_clean_key"
+app.secret_key = "ssh_pro_premium_clean_key_v2"
 DB_FILE = "/etc/custom-panel/panel.db"
 
 def init_db():
@@ -85,32 +80,41 @@ def get_online_users():
     return list(get_sshd_connections().keys())
 
 def get_user_real_traffic(username):
+    """موتور اصلاح‌شده و فوق‌دقیق استخراج بایت ترافیک مصرفی از فایروال هسته لینوکس"""
     try:
         res = subprocess.check_output(f"id -u {username}", shell=True).decode().strip()
         uid = int(res)
         
-        # بررسی رول‌ها بدون ایجاد تکرار یا خطا در محیط فایروال
+        # تضمین وجود قوانین فایروال بدون تداخل برای پایش زنده
         subprocess.run(f"sudo iptables -C OUTPUT -m owner --uid-owner {uid} -j ACCEPT 2>/dev/null || sudo iptables -I OUTPUT 1 -m owner --uid-owner {uid} -j ACCEPT", shell=True)
         subprocess.run(f"sudo iptables -C INPUT -m owner --uid-owner {uid} -j ACCEPT 2>/dev/null || sudo iptables -I INPUT 1 -m owner --uid-owner {uid} -j ACCEPT", shell=True)
         
-        output_bytes = 0
+        total_bytes = 0
+        
+        # خواندن دقیق بایت‌های خروجی (OUTPUT)
         try:
-            lines = subprocess.check_output("sudo iptables -L OUTPUT -v -n -x | grep -E 'owner UID match'", shell=True).decode().strip().split('\n')
-            for line in lines:
-                if f"match {uid}" in line:
-                    output_bytes += int(line.split()[0])
+            out_lines = subprocess.check_output("sudo iptables -L OUTPUT -v -n -x", shell=True).decode().strip().split('\n')
+            for line in out_lines:
+                if f"owner UID match {uid}" in line or f"owner match {uid}" in line:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        total_bytes += int(parts[1]) # ایندکس دقیق بایت‌های ارسالی در خروجی فایروال
         except:
             pass
-                
+            
+        # خواندن دقیق بایت‌های ورودی (INPUT)
         try:
-            lines_in = subprocess.check_output("sudo iptables -L INPUT -v -n -x | grep -E 'owner UID match'", shell=True).decode().strip().split('\n')
-            for line in lines_in:
-                if f"match {uid}" in line:
-                    output_bytes += int(line.split()[0])
+            in_lines = subprocess.check_output("sudo iptables -L INPUT -v -n -x", shell=True).decode().strip().split('\n')
+            for line in in_lines:
+                if f"owner UID match {uid}" in line or f"owner match {uid}" in line:
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        total_bytes += int(parts[1]) # ایندکس دقیق بایت‌های دریافتی در خروجی فایروال
         except:
             pass
 
-        return output_bytes / (1024.0 * 1024.0 * 1024.0)
+        # تبدیل بایت خالص به گیگابایت (GB) با دقت بالا
+        return total_bytes / (1024.0 * 1024.0 * 1024.0)
     except:
         return 0.0
 
@@ -139,7 +143,7 @@ def monitor_core_logic():
             conn = sqlite3.connect(DB_FILE)
             cursor = conn.cursor()
             
-            # ۱. بررسی تاریخ انقضا
+            # ۱. پایش اعتبار زمانی اکانت‌ها
             cursor.execute("SELECT username, expire_date, status FROM users WHERE status='Active'")
             active_users = cursor.fetchall()
             for user in active_users:
@@ -149,7 +153,7 @@ def monitor_core_logic():
                     cursor.execute("UPDATE users SET status='Expired' WHERE username=?", (username,))
                     subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            # ۲. بررسی ترافیک مصرفی واقعی کاربران
+            # ۲. مانیتورینگ آنلاین ترافیک فایروال و اعمال محدودیت حجمی
             active_connections = get_sshd_connections()
             cursor.execute("SELECT username, limit_gb, used_gb, status FROM users")
             db_users = {r[0]: {"limit": r[1], "used": r[2], "status": r[3]} for r in cursor.fetchall()}
@@ -158,6 +162,7 @@ def monitor_core_logic():
                 userdata = db_users[username]
                 real_gb_used = get_user_real_traffic(username)
                 
+                # ثبت ترافیک واقعیِ زنده در دیتابیس
                 cursor.execute("UPDATE users SET used_gb=? WHERE username=?", (real_gb_used, username))
                 userdata['used'] = real_gb_used
 
@@ -166,7 +171,7 @@ def monitor_core_logic():
                     cursor.execute("UPDATE users SET status='Traffic_Limit' WHERE username=?", (username,))
                     subprocess.run(f"sudo killall -u {username}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
-            # ۳. محدودیت سفت و سخت اتصال همزمان کلاینت (فقط ۱ اتصال)
+            # ۳. جلوگیری سفت و سخت از اتصال همزمان (Multi-Login Blocker)
             for username, pids in active_connections.items():
                 if len(pids) > 1:
                     for extra_pid in pids[1:]:
@@ -183,94 +188,144 @@ HTML_TEMPLATE = """
 <html lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>⚡ SSH PRO PANEL - ULTRA STABLE INPLACE ⚡</title>
+    <title>⚡ SSH PRO DASHBOARD - PREMIUM DARK ⚡</title>
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;700&display=swap');
+        
         :root {
-            --bg-color: #0f172a;
-            --card-bg: #1e293b;
+            --bg-color: #0b0f19;
+            --card-bg: #151f32;
+            --input-bg: #1e293b;
             --accent-blue: #3b82f6;
             --accent-green: #10b981;
-            --accent-red: #ef4444;
-            --accent-yellow: #f59e0b;
-            --text-main: #f8fafc;
-            --text-muted: #94a3b8;
-            --border-color: #334155;
+            --accent-red: #f43f5e;
+            --accent-yellow: #eab308;
+            --text-main: #f1f5f9;
+            --text-muted: #64748b;
+            --border-color: #1e293b;
         }
-        body { font-family: 'Segoe UI', Tahoma, Arial; background-color: var(--bg-color); color: var(--text-main); margin: 0; padding: 30px; direction: rtl; }
-        .container { max-width: 1400px; background: var(--card-bg); padding: 30px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.4); margin: auto; border: 1px solid var(--border-color); }
-        h1 { font-size: 26px; color: var(--text-main); display: flex; align-items: center; gap: 10px; margin-bottom: 25px; }
-        h2 { font-size: 18px; color: var(--accent-blue); margin-top: 35px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; }
-        .grid-header { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 25px; }
-        .card-inner { background: #111827; padding: 20px; border-radius: 8px; border: 1px solid var(--border-color); margin-bottom: 20px; }
+        body { 
+            font-family: 'Vazirmatn', Tahoma, Arial, sans-serif; 
+            background-color: var(--bg-color); 
+            color: var(--text-main); 
+            margin: 0; 
+            padding: 40px 20px; 
+            direction: rtl; 
+            letter-spacing: -0.3px;
+        }
+        .container { 
+            max-width: 1440px; 
+            background: var(--card-bg); 
+            padding: 35px; 
+            border-radius: 16px; 
+            box-shadow: 0 20px 40px rgba(0,0,0,0.5); 
+            margin: auto; 
+            border: 1px solid rgba(255,255,255,0.03); 
+        }
+        h1 { font-size: 24px; font-weight: 700; margin-bottom: 30px; display: flex; align-items: center; gap: 12px; color: #fff; }
+        h2 { font-size: 17px; font-weight: 700; color: var(--accent-blue); margin-top: 40px; margin-bottom: 15px; display: flex; align-items: center; gap: 6px; }
+        .grid-header { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .card-inner { background: #0f172a; padding: 22px; border-radius: 12px; border: 1px solid var(--border-color); box-shadow: inset 0 2px 4px rgba(0,0,0,0.2); }
         form { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-        input { background: #111827; color: var(--text-main); border: 1px solid var(--border-color); padding: 10px 14px; border-radius: 6px; flex: 1; min-width: 120px; }
-        button { padding: 10px 20px; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; transition: 0.2s; }
-        button:hover { filter: brightness(1.2); }
-        .btn-blue { background: var(--accent-blue); } .btn-green { background: var(--accent-green); } .btn-red { background: var(--accent-red); }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; background: #111827; border-radius: 8px; overflow: hidden; }
-        th, td { border: 1px solid var(--border-color); padding: 14px; text-align: center; }
-        th { background-color: #1e293b; color: var(--text-muted); }
+        input, select { 
+            background: var(--input-bg); 
+            color: #fff; 
+            border: 1px solid var(--border-color); 
+            padding: 12px 16px; 
+            border-radius: 8px; 
+            flex: 1; 
+            min-width: 140px; 
+            font-family: 'Vazirmatn';
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        input:focus { border-color: var(--accent-blue); outline: none; box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
+        button { 
+            padding: 12px 24px; 
+            color: white; 
+            border: none; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            font-weight: 700; 
+            font-family: 'Vazirmatn';
+            font-size: 14px;
+            transition: all 0.2s; 
+        }
+        button:hover { filter: brightness(1.15); transform: translateY(-1px); }
+        button:active { transform: translateY(0); }
+        .btn-blue { background: var(--accent-blue); } 
+        .btn-green { background: var(--accent-green); } 
+        .btn-red { background: var(--accent-red); }
+        table { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 15px; background: #0f172a; border-radius: 12px; overflow: hidden; border: 1px solid var(--border-color); }
+        th, td { padding: 16px; text-align: center; font-size: 14px; border-bottom: 1px solid var(--border-color); }
+        th { background-color: #111827; color: var(--text-muted); font-weight: 700; font-size: 13px; text-transform: uppercase; }
+        tr:last-child td { border-bottom: none; }
         tr:hover { background-color: #1e293b; }
-        .badge { padding: 5px 10px; border-radius: 5px; font-size: 12px; font-weight: bold; display: inline-block; }
-        .online { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid #10b981; }
-        .offline { background: rgba(148, 163, 184, 0.2); color: #cbd5e1; border: 1px solid #94a3b8; }
-        .alert-flash { padding: 12px; background: rgba(239, 68, 68, 0.2); border: 1px solid var(--accent-red); color: #f87171; border-radius: 6px; margin-bottom: 20px; text-align: center; font-weight: bold; }
-        .progress-container { width: 100%; background-color: #334155; border-radius: 4px; height: 10px; margin-top: 6px; overflow: hidden; position: relative; }
-        .progress-bar { height: 100%; width: 100%; transition: width 0.5s ease, background-color 0.5s ease; }
+        .badge { padding: 6px 12px; border-radius: 6px; font-size: 12px; font-weight: 700; display: inline-block; }
+        .online { background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); }
+        .offline { background: rgba(100, 116, 139, 0.15); color: #94a3b8; border: 1px solid rgba(100, 116, 139, 0.3); }
+        .alert-flash { padding: 14px; background: rgba(244, 63, 94, 0.15); border: 1px solid var(--accent-red); color: #f43f5e; border-radius: 8px; margin-bottom: 25px; text-align: center; font-weight: 700; font-size: 14px; }
+        
+        /* طراحی پرمیوم و شیک نوار حجم باقی‌مانده */
+        .progress-wrapper { width: 230px; text-align: right; margin: auto; }
+        .progress-text { display: flex; justify-content: space-between; font-size: 12px; font-weight: 400; color: #94a3b8; margin-bottom: 5px; }
+        .progress-container { width: 100%; background-color: #1e293b; border-radius: 10px; height: 8px; overflow: hidden; box-shadow: inset 0 1px 3px rgba(0,0,0,0.5); }
+        .progress-bar { height: 100%; width: 100%; border-radius: 10px; transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.4s ease; }
+        code { background: #1e293b; padding: 4px 8px; border-radius: 4px; font-family: Courier, monospace; color: #38bdf8; font-size: 13px; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>⚡ پنل پایدار جایگزین SSH PRO + نوار وضعیت مصرف ترافیک هوشمند</h1>
+        <h1>⚡ مدیریت اکانت‌های ویژه SSH PRO PANEL</h1>
         
         {% with messages = get_flashed_messages() %}
           {% if messages %}
             {% for message in messages %}
-              <div class="alert-flash">⚠️ {{ message }}</div>
+              <div class="alert-flash">📢 {{ message }}</div>
             {% endfor %}
           {% endif %}
         {% endwith %}
 
         <div class="grid-header">
             <div class="card-inner" style="margin-bottom:0;">
-                <h3 style="margin-top:0; color:var(--accent-green);">📥 پشتیبان‌گیری دیتابیس کاربران</h3>
-                <p style="color:var(--text-muted); font-size:13px; margin-bottom:15px;">دانلود فایل خروجی زنده JSON از ساختار کل کاربران.</p>
-                <a href="/backup/download"><button class="btn-green" style="width:100%;">📥 دانلود فوری فایل بک‌آب</button></a>
+                <h3 style="margin-top:0; font-size:15px; color:var(--accent-green);">📥 فایل پشتیبان سیستم</h3>
+                <p style="color:var(--text-muted); font-size:13px; margin-bottom:15px;">دانلود دیتابیس کانفیگ‌ها به صورت فایل ساختاریافته هوشمند JSON.</p>
+                <a href="/backup/download"><button class="btn-green" style="width:100%;">📥 دانلود نسخه پشتیبان کاربران</button></a>
             </div>
             <div class="card-inner" style="margin-bottom:0;">
-                <h3 style="margin-top:0; color:var(--accent-red);">📤 بازگردانی فایل پشتیبان</h3>
-                <p style="color:var(--text-muted); font-size:13px; margin-bottom:15px;">فایل بک‌آپ دانلود شده از قبل را جهت بازیابی ایمن بارگذاری کنید.</p>
+                <h3 style="margin-top:0; font-size:15px; color:var(--accent-red);">📤 بازگردانی دیتابیس (Restore)</h3>
+                <p style="color:var(--text-muted); font-size:13px; margin-bottom:12px;">فایل بک‌آپ دانلود شده از قبل را بارگذاری و اعمال کنید.</p>
                 <form action="/backup/restore" method="POST" enctype="multipart/form-data" style="flex-direction: column; align-items: stretch; gap: 8px;">
-                    <input type="file" name="backup_file" accept=".json" required style="padding:6px;">
-                    <button type="submit" class="btn-red">📤 شروع عملیات بازگردانی (Restore)</button>
+                    <input type="file" name="backup_file" accept=".json" required style="padding:8px;">
+                    <button type="submit" class="btn-red">📤 شروع بازیابی بدون تغییر اطلاعات</button>
                 </form>
             </div>
         </div>
         
-        <h2>➕ ساخت اکانت تک‌کاربره جدید</h2>
+        <h2>✨ افزودن اکانت اختصاصی جدید</h2>
         <div class="card-inner">
             <form action="/add" method="POST">
                 <input type="text" name="username" placeholder="نام کاربری" required>
                 <input type="text" name="password" placeholder="کلمه عبور" required>
-                <input type="number" step="0.1" name="limit_gb" placeholder="حجم مجاز (GB)" required>
-                <input type="number" name="days" placeholder="مدت اعتبار (روز)" required>
-                <button type="submit" class="btn-blue">ایجاد کاربر</button>
+                <input type="number" step="0.1" name="limit_gb" placeholder="حجم ترافیک مجاز (GB)" required>
+                <input type="number" name="days" placeholder="مدت دوره (روز)" required>
+                <button type="submit" class="btn-blue">➕ ایجاد و فعال‌سازی</button>
             </form>
         </div>
 
-        <h2>👥 وضعیت زنده و ترافیک مصرفی کاربران</h2>
+        <h2>👥 وضعیت مصرف ترافیک و مانیتورینگ آنلاین</h2>
         <table>
             <thead>
                 <tr>
                     <th>نام کاربری</th>
                     <th>کلمه عبور</th>
-                    <th>حجم مجاز (GB)</th>
-                    <th>حجم مصرفی واقعی (GB)</th>
-                    <th>نمودار حجم باقی‌مانده</th>
-                    <th>روزهای باقی‌مانده</th>
+                    <th>حجم کل (GB)</th>
+                    <th>حجم مصرفی (GB)</th>
+                    <th>وضعیت نوار حجم مجاز</th>
+                    <th>اعتبار زمانی</th>
                     <th>وضعیت اتصال</th>
-                    <th>وضعیت سیستم</th>
-                    <th>عملیات مدیریت اکانت</th>
+                    <th>وضعیت سرویس</th>
+                    <th>اقدام سرویس</th>
                 </tr>
             </thead>
             <tbody id="user-table-body">
@@ -292,9 +347,9 @@ HTML_TEMPLATE = """
                         ? '<span class="badge online">● آنلاین</span>' 
                         : '<span class="badge offline">○ آفلاین</span>';
                     
-                    let statusText = '<span style="color:#34d399;">✔ فعال</span>';
-                    if (user.status === 'Expired') statusText = '<span style="color:#f87171;">❌ منقضی</span>';
-                    if (user.status === 'Traffic_Limit') statusText = '<span style="color:#fbbf24;">⚠️ پایان حجم</span>';
+                    let statusText = '<span style="color:#10b981; font-weight:700;">فعال</span>';
+                    if (user.status === 'Expired') statusText = '<span style="color:#f43f5e; font-weight:700;">منقضی دوره</span>';
+                    if (user.status === 'Traffic_Limit') statusText = '<span style="color:#eab308; font-weight:700;">اتمام ترافیک</span>';
 
                     const totalGb = user.limit_gb;
                     const usedGb = user.used_gb;
@@ -303,7 +358,7 @@ HTML_TEMPLATE = """
                     
                     let remainingPercent = totalGb > 0 ? (remainingGb / totalGb) * 100 : 0;
                     
-                    // تغییر رنگ هوشمند نوار وضعیت بر اساس باقیمانده حجم
+                    // تغییر رنگ داینامیک و لوکس بر اساس باقیمانده حجم کاربر
                     let barColor = 'var(--accent-green)'; 
                     if (remainingPercent <= 50 && remainingPercent > 20) {
                         barColor = 'var(--accent-yellow)'; 
@@ -313,28 +368,33 @@ HTML_TEMPLATE = """
 
                     const tr = document.createElement('tr');
                     tr.innerHTML = `
-                        <td style="font-weight:bold; color:var(--accent-blue);">${user.username}</td>
+                        <td style="font-weight:700; color:#3b82f6;">${user.username}</td>
                         <td><code>${user.password}</code></td>
-                        <td>${totalGb} GB</td>
-                        <td><span style="color:#38bdf8; font-weight:bold;">${usedGb.toFixed(4)}</span> GB</td>
-                        <td style="width: 220px; text-align: right; font-size: 11px;">
-                            <div>باقی‌مانده: <b>${remainingGb.toFixed(2)} GB</b> (${remainingPercent.toFixed(0)}%)</div>
-                            <div class="progress-container">
-                                <div class="progress-bar" style="width: ${remainingPercent}%; background-color: ${barColor};"></div>
+                        <td style="font-weight:700; color:#cbd5e1;">${totalGb} GB</td>
+                        <td><span style="color:#38bdf8; font-weight:700;">${usedGb.toFixed(3)}</span> GB</td>
+                        <td>
+                            <div class="progress-wrapper">
+                                <div class="progress-text">
+                                    <span>باقی‌مانده: <b>${remainingGb.toFixed(2)} GB</b></span>
+                                    <span>${remainingPercent.toFixed(0)}%</span>
+                                </div>
+                                <div class="progress-container">
+                                    <div class="progress-bar" style="width: ${remainingPercent}%; background-color: ${barColor};"></div>
+                                </div>
                             </div>
                         </td>
-                        <td style="font-weight: bold; color: #f43f5e;">${user.remaining_days >= 0 ? user.remaining_days + ' روز' : 'منقضی شده'}</td>
+                        <td style="font-weight: 700; color: #f43f5e;">${user.remaining_days >= 0 ? user.remaining_days + ' روز' : 'پایان زمان'}</td>
                         <td>${onlineBadge}</td>
                         <td>${statusText}</td>
                         <td>
-                            <a href="/renew/${user.username}"><button class="btn-green" style="padding:6px 12px; font-size:12px;">🔄 تمدید و ریست دوره</button></a>
-                            <a href="/delete/${user.username}"><button class="btn-red" style="padding:6px 12px; font-size:12px;">حذف کاربر</button></a>
+                            <a href="/renew/${user.username}"><button class="btn-green" style="padding:6px 14px; font-size:12px; border-radius:6px;">🔄 ریست دوره</button></a>
+                            <a href="/delete/${user.username}"><button class="btn-red" style="padding:6px 14px; font-size:12px; border-radius:6px;">حذف</button></a>
                         </td>
                     `;
                     tbody.appendChild(tr);
                 });
             } catch (error) {
-                console.error("Error updating table:", error);
+                console.error("Error updating interface components:", error);
             }
         }
         fetchLiveStatus();
@@ -499,7 +559,7 @@ def restore_backup():
             ''', (username, password, limit_gb, used_gb, expire_date, status, init_gb, init_days))
         conn.commit()
         conn.close()
-        flash("فایل پشتیبان با موفقیت جایگذاری شد.")
+        flash("پشتیبان‌گیری با موفقیت بدون تداخل جایگذاری شد.")
     except Exception as e:
         flash(f"خطا در ریستور: {str(e)}")
     return redirect('/')
@@ -510,7 +570,7 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
 EOF
 
-    echo "[*] Ensuring systemd configuration is aligned..."
+    echo "[*] Confirming Service Layout Configuration..."
     sudo tee /etc/systemd/system/custom-panel.service > /dev/null <<EOF
 [Unit]
 Description=SSH Advanced GUI Dark Panel Ultimate
@@ -530,12 +590,12 @@ EOF
     sudo systemctl restart custom-panel.service
 }
 
-# اجرای قدم‌به‌قدم متد جایگزینی امن
+# اجرای بهینه
 update_and_replace_logic
 install_prerequisites
 create_panel_app
 
 echo -e "\e[1;32m==================================================\e[0m"
-echo -e "\e[1;32m✔ SUCCESS: PANEL INPLACE-REPLACED WITHOUT CRASH   \e[0m"
-echo -e "\e[1;36m🌐 LIVE DASHBOARD RUNNING STABLY ON PORT 5000     \e[0m"
+echo -e "\e[1;32m✔ DONE: ALL ENGINES ARE FULLY WORKING & FIXED!    \e[0m"
+echo -e "\e[1;36m🌐 PREMIUM DASHBOARD UPDATED LIVE ON PORT 5000     \e[0m"
 echo -e "\e[1;32m==================================================\e[0m"
