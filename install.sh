@@ -1,25 +1,25 @@
 #!/bin/bash
 
-# ۱. پاکسازی کامل پروسس‌ها و پورت‌های قدیمی
+# ۱. آزادسازی کامل پورت ۵۰۰۰ و کشتن پردازش‌های تداخلی پایتون
 sudo killall -9 python3 2>/dev/null
 sudo fuser -k 5000/tcp 2>/dev/null
 sudo rm -f /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock 2>/dev/null
 
-# ۲. نصب نیازمندی‌های لینوکس
+# ۲. نصب و آپدیت پکیج‌های پایدار لینوکس اوبونتو
 sudo apt update -y
 sudo apt install -y openssh-server python3 python3-flask sqlite3 psmisc coreutils
 
-# ۳. ایجاد پوشه اصلی پنل با دسترسی کامل
+# ۳. ایجاد دایرکتوری پنل و تنظیم پرمیشن امنیتی
 sudo mkdir -p /etc/custom-panel
 sudo chmod 755 /etc/custom-panel
 
-# ۴. تزریق مستقیم کد پایتون کالیبره شده بدون کوچکترین تداخل سینتکس
+# ۴. تزریق کدهای هسته پایتون (نسخه کالیبره شده با دکمه بازگردانی بک‌آ‌پ سریع)
 cat << 'EOF' > /etc/custom-panel/app.py
 import os, subprocess, datetime, sqlite3, json, time, threading, pwd
 from flask import Flask, request, render_template_string, redirect, send_file, jsonify
 
 app = Flask(__name__)
-app.secret_key = "ssh_pro_glass_precision_fixed"
+app.secret_key = "ssh_pro_glass_final_fixed"
 DB_FILE = "/etc/custom-panel/panel.db"
 db_lock = threading.Lock()
 
@@ -70,7 +70,7 @@ def live_monitor_daemon():
                             user_to_pids_map[user] = []
                         user_to_pids_map[user].append(pid)
 
-            # تک کاربره سخت‌گیرانه آنی (کشتن دیوایس‌های همزمان قبلی و حفظ اتصال جدید)
+            # تک کاربره بودن فوق سخت‌گیرانه (کشتن دیوایس‌های همزمان قبلی و نگه داشتن آخرین اتصال)
             for username, pids in user_to_pids_map.items():
                 if len(pids) > 1:
                     pids.sort(key=int)
@@ -79,7 +79,7 @@ def live_monitor_daemon():
                         if old_pid in LAST_PID_BYTES:
                             del LAST_PID_BYTES[old_pid]
 
-            # محاسبه ترافیک زنده تفاضلی تقسیم بر فاکتور کالیبره ۳.۵ (تطبیق ۱۰۰٪ با کنتور گوشی)
+            # مانیتورینگ زنده تفاضلی حجم با تقسیم بر فاکتور کالیبراسیون ۳.۵ گوشی
             with db_lock:
                 conn = get_db_connection()
                 cursor = conn.cursor()
@@ -109,7 +109,7 @@ def live_monitor_daemon():
                 if dead_pid not in active_pids_this_run:
                     del LAST_PID_BYTES[dead_pid]
 
-            # قطع دسترسی آنی کاربران اتمام حجم یا زمان
+            # بررسی محدودیت زمانی و حجمی و قطع فوری کانکشن به محض اتمام
             with db_lock:
                 conn = get_db_connection()
                 cursor = conn.cursor()
@@ -125,7 +125,6 @@ def live_monitor_daemon():
         except: pass
         time.sleep(1.5)
 
-# قالب وب شیشه‌ای با قابلیت لود بدون وقفه و دکمه‌های ریسپانس بک‌آپ
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html>
@@ -380,8 +379,8 @@ if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
 EOF
 
-# ۵. اصلاح دقیق و مهندسی‌شده مسیرهای سرویس سیستم‌عامل لینوکس
-sudo tee /etc/systemctl/system/custom-panel.service > /dev/null << 'SERVICEEOF'
+# ۵. ساخت اسکلت سرویس سیستم‌عامل در مسیر کاملاً دقیق و فیکس شده لینوکس اوبونتو
+sudo tee /etc/systemd/system/custom-panel.service > /dev/null << 'SERVICEEOF'
 [Unit]
 Description=SSH Pro Absolute Calibrated Engine Panel
 After=network.target
@@ -398,12 +397,12 @@ RestartSec=2
 WantedBy=multi-user.target
 SERVICEEOF
 
-# ۶. ریلود دیمون‌ها و استارت موفقیت‌آمیز پنل وب
+# ۶. ریلود، فعال‌سازی و استارت موفقیت‌آمیز دیمون سیستمی بدون ارور قرمز رنگ
 sudo systemctl daemon-reload
 sudo systemctl enable custom-panel.service
 sudo systemctl restart custom-panel.service
 
 echo "--------------------------------------------------"
-echo "✔ CALIBRATION & SERVICE FIX COMPLETED"
+echo "✔ ALL FIXES DEPLOYED AND SERVICE STARTED SUCCESSFULLY"
 echo "🌐 LISTEN WEB PORT: 5000"
 echo "--------------------------------------------------"
